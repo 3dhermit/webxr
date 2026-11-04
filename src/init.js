@@ -124,6 +124,7 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 		renderer,
 		player,
 		controllers,
+		controls,
 	};
 
 	setupScene(globals);

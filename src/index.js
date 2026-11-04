@@ -1,181 +1,149 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Entry point. A classroom build boots straight into the lesson: no typing, no accounts, no
+ * developer surface.
  *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
+ *   index.html                 student mode (default)
+ *   index.html?level=ms        the same lesson in the younger reading register
+ *   index.html?debug=1         desktop-only dev HUD plus arrow-key stepping (never in the headset)
+ *   index.html?demo=tutorial   the original webxr-first-steps blaster tutorial
+ *
+ * Everything a student reads or presses is geometry inside the scene, because Quest Browser does
+ * not support DOM overlay in immersive-vr. The ?debug=1 HUD exists only on a developer's monitor.
  */
-
-import * as THREE from 'three';
-
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { Text } from 'troika-three-text';
+import { AnatomyModel } from './lesson/anatomy.js';
+import { Lesson } from './lesson/lesson.js';
 import { XR_BUTTONS } from 'gamepad-wrapper';
-import { gsap } from 'gsap';
 import { init } from './init.js';
+import lessonData from './lessons/heart.json';
+import { makeText } from './lesson/text.js';
+import registry from './assets/anatomy/parts.json';
 
-const bullets = {};
-const forwardVector = new THREE.Vector3(0, 0, -1);
-const bulletSpeed = 10;
-const bulletTimeToLive = 1;
+const params = new URLSearchParams(window.location.search);
+const DEBUG = params.get('debug') === '1';
 
-const blasterGroup = new THREE.Group();
-const targets = [];
+let g; // { scene, camera, renderer, player, controllers }, filled by init()
+let model;
+let lesson;
+let status;
+let hud;
+let ready = false;
 
-let score = 0;
-const scoreText = new Text();
-scoreText.fontSize = 0.52;
-scoreText.font = 'assets/SpaceMono-Bold.ttf';
-scoreText.position.z = -2;
-scoreText.color = 0xffa276;
-scoreText.anchorX = 'center';
-scoreText.anchorY = 'middle';
+async function boot() {
+	model = await AnatomyModel.load({
+		url: 'assets/anatomy/heart-male.opt.glb',
+		registry,
+	});
+	model.place(lessonData.runtime.tablePlacement);
+	model.explodeGain = lessonData.runtime.explodeGain ?? 0.55;
+	g.player.add(model.group);
 
-let laserSound, scoreSound;
+	lesson = new Lesson({
+		player: g.player,
+		camera: g.camera,
+		renderer: g.renderer,
+		model,
+		data: lessonData,
+		level: params.get('level') || undefined,
+		debug: DEBUG,
+	});
+	g.player.add(lesson.root);
 
-function updateScoreDisplay() {
-	const clampedScore = Math.max(0, Math.min(9999, score));
-	const displayScore = clampedScore.toString().padStart(4, '0');
-	scoreText.text = displayScore;
-	scoreText.sync();
+	status.visible = false;
+	lesson.enterStep(0);
+	ready = true;
+
+	// Dev hooks, student-mode-clean: a headset student gets no developer surface at all.
+	if (DEBUG) {
+		window.__lesson = lesson;
+		window.__anatomy = model;
+		window.__scene = g.scene;
+		window.__renderer = g.renderer;
+	}
 }
 
-function setupScene({ scene, camera, renderer, player, controllers }) {
-	const gltfLoader = new GLTFLoader();
+function setupScene({ scene, camera, renderer, player, controllers, controls }) {
+	g = { scene, camera, renderer, player, controllers, controls };
 
-	gltfLoader.load('assets/spacestation.glb', (gltf) => {
-		scene.add(gltf.scene);
-	});
-
-	gltfLoader.load('assets/blaster.glb', (gltf) => {
-		blasterGroup.add(gltf.scene);
-	});
-
-	gltfLoader.load('assets/target.glb', (gltf) => {
-		for (let i = 0; i < 3; i++) {
-			const target = gltf.scene.clone();
-			target.position.set(
-				Math.random() * 10 - 5,
-				i * 2 + 1,
-				-Math.random() * 5 - 5,
-			);
-			scene.add(target);
-			targets.push(target);
-		}
-	});
-
-	scene.add(scoreText);
-	scoreText.position.set(0, 0.67, -1.44);
-	scoreText.rotateX(-Math.PI / 3.3);
-	updateScoreDisplay();
-
-	// Load and set up positional audio
-	const listener = new THREE.AudioListener();
-	camera.add(listener);
-
-	const audioLoader = new THREE.AudioLoader();
-	laserSound = new THREE.PositionalAudio(listener);
-	audioLoader.load('assets/laser.ogg', (buffer) => {
-		laserSound.setBuffer(buffer);
-		blasterGroup.add(laserSound);
-	});
-
-	scoreSound = new THREE.PositionalAudio(listener);
-	audioLoader.load('assets/score.ogg', (buffer) => {
-		scoreSound.setBuffer(buffer);
-		scoreText.add(scoreSound);
-	});
-}
-
-function onFrame(
-	delta,
-	time,
-	{ scene, camera, renderer, player, controllers },
-) {
-	if (controllers.right) {
-		const { gamepad, raySpace, mesh } = controllers.right;
-		if (!raySpace.children.includes(blasterGroup)) {
-			raySpace.add(blasterGroup);
-			mesh.visible = false;
-		}
-		if (gamepad.getButtonClick(XR_BUTTONS.TRIGGER)) {
-			try {
-				gamepad.getHapticActuator(0).pulse(0.6, 100);
-			} catch {
-				// do nothing
-			}
-
-			// Play laser sound
-			if (laserSound.isPlaying) laserSound.stop();
-			laserSound.play();
-
-			const bulletPrototype = blasterGroup.getObjectByName('bullet');
-			if (bulletPrototype) {
-				const bullet = bulletPrototype.clone();
-				scene.add(bullet);
-				bulletPrototype.getWorldPosition(bullet.position);
-				bulletPrototype.getWorldQuaternion(bullet.quaternion);
-
-				const directionVector = forwardVector
-					.clone()
-					.applyQuaternion(bullet.quaternion);
-				bullet.userData = {
-					velocity: directionVector.multiplyScalar(bulletSpeed),
-					timeToLive: bulletTimeToLive,
-				};
-				bullets[bullet.uuid] = bullet;
-			}
-		}
+	// On a monitor, put the preview camera where a student's head will be, so what the developer
+	// sees is what the class sees. In the headset XR drives the camera, so OrbitControls is off.
+	if (controls) {
+		// Match the monitor preview to the headset: eye height, and the Quest 2 vertical field of
+		// view (~88 degrees) instead of three.js's 50, so "it looks fine on my laptop" stops being
+		// a lie. In immersive mode XR replaces this projection anyway.
+		camera.fov = 88;
+		camera.updateProjectionMatrix();
+		controls.target.set(0, 1.3, -0.62);
+		camera.position.set(0.02, 1.45, 0.02);
+		controls.update();
+		renderer.xr.addEventListener?.('sessionstart', () => {
+			controls.enabled = false;
+		});
+		renderer.xr.addEventListener?.('sessionend', () => {
+			controls.enabled = true;
+		});
 	}
 
-	Object.values(bullets).forEach((bullet) => {
-		if (bullet.userData.timeToLive < 0) {
-			delete bullets[bullet.uuid];
-			scene.remove(bullet);
-			return;
-		}
-		const deltaVec = bullet.userData.velocity.clone().multiplyScalar(delta);
-		bullet.position.add(deltaVec);
-		bullet.userData.timeToLive -= delta;
+	// Quest 2 has a narrow lens sweet spot; fixed foveation buys resolution where the eye looks.
+	renderer.xr.addEventListener?.('sessionstart', () => renderer.xr.setFoveation?.(1));
 
-		targets
-			.filter((target) => target.visible)
-			.forEach((target) => {
-				const distance = target.position.distanceTo(bullet.position);
-				if (distance < 1) {
-					delete bullets[bullet.uuid];
-					scene.remove(bullet);
-
-					gsap.to(target.scale, {
-						duration: 0.3,
-						x: 0,
-						y: 0,
-						z: 0,
-						onComplete: () => {
-							target.visible = false;
-							setTimeout(() => {
-								target.visible = true;
-								target.position.x = Math.random() * 10 - 5;
-								target.position.z = -Math.random() * 5 - 5;
-
-								// Scale back up the target
-								gsap.to(target.scale, {
-									duration: 0.3,
-									x: 1,
-									y: 1,
-									z: 1,
-								});
-							}, 1000);
-						},
-					});
-
-					score += 10;
-					updateScoreDisplay();
-					if (scoreSound.isPlaying) scoreSound.stop();
-					scoreSound.play();
-				}
-			});
+	status = makeText({
+		fontSize: 0.03,
+		maxWidth: 0.6,
+		anchorX: 'center',
+		anchorY: 'middle',
+		align: 'center',
 	});
-	gsap.ticker.tick(delta);
+	status.text = 'Preparing the heart\u2026';
+	status.sync();
+	status.position.set(0, 1.35, -0.6);
+	player.add(status);
+
+	boot().catch((err) => {
+		console.error(err);
+		status.text = 'The heart could not be loaded.\nAsk your teacher to reload the page.';
+		status.sync();
+	});
+
+	if (DEBUG) {
+		hud = document.createElement('div');
+		hud.style.cssText =
+			'position:fixed;left:12px;top:12px;z-index:9;font:12px monospace;color:#cfe;white-space:pre;background:rgba(0,0,0,.55);padding:8px 10px;border-radius:6px';
+		document.body.appendChild(hud);
+		window.addEventListener('keydown', (e) => {
+			if (!ready) return;
+			if (e.key === 'ArrowRight') lesson.next();
+			else if (e.key === 'ArrowLeft') lesson.prev();
+			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
+			else if (e.key === 'r') lesson.reset();
+		});
+	}
 }
 
-init(setupScene, onFrame);
+function onFrame(delta, _time, globals) {
+	if (!ready) return;
+	const controllers = globals.controllers;
+	lesson.update(delta, controllers);
+
+	const ct = controllers.right || controllers.left;
+	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
+		if (lesson.done) lesson.reset();
+		else if (lesson.pickButton(controllers)) lesson.next();
+		else lesson.select(lesson.hover);
+	}
+
+	if (hud) {
+		const s = lesson.state();
+		hud.textContent = [
+			`step ${s.step}  ${s.stepId}  level=${s.level}`,
+			`explode ${s.factor}  hover=${s.hover ?? '-'}  ready=${s.ready}`,
+			`flow ${s.flow.i}/8 misses=${s.flow.misses}   find left=${s.find.left}`,
+			`draw ${s.drawCalls}  tris ${s.tris}`,
+		].join('\n');
+	}
+}
+
+if (params.get('demo') === 'tutorial') {
+	import('./tutorial.js').then((t) => init(t.setupScene, t.onFrame));
+} else {
+	init(setupScene, onFrame);
+}

@@ -60,6 +60,10 @@ L.objectives.forEach(o => {
 const longPrompt = L.steps.filter(s => (s.prompt.hs || '').split(' ').length > 34);
 if (longPrompt.length) warns.push(`prompts over 34 words (hard to read in-headset): ${longPrompt.map(s => s.id).join(', ')}`);
 
+// Student-facing display names must cover every pointable part and must not invent parts.
+for (const id of L.tiers.core) if (!(id in (L.names || {}))) errs.push(`core part ${id} has no student-facing name in lesson.names`);
+for (const id of Object.keys(L.names || {})) if (!ids.has(id)) errs.push(`lesson.names has ${id}, which is not in the registry`);
+
 const minutes = L.steps.reduce((a, s) => a + s.minutes, 0);
 console.log(`lesson ${L.id}: ${L.steps.length} steps, ${minutes} min (declared ${L.timeMinutes.core})`);
 console.log(`registry ${ids.size} parts | tiers core ${L.tiers.core.length} + detail ${L.tiers.detail.length} | flow ${L.flow.order.length} steps (${flowParts.length} real parts) | quiz ${L.quiz.length}`);
