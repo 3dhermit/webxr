@@ -47,13 +47,28 @@ Four entry modes on one page (all query-string, no builds per audience):
   ontology IDs at runtime; exploded view verified visually, not just numerically.
 - **Lesson content spine complete**: 5 steps, 12 min, NGSS-anchored (HS-LS1-2, MS-LS1-3),
   every physiology claim traceable to a CC BY source, validated by `npm run validate`.
-- **P2 lesson runtime built and desktop-verified** (`a1fd5fa`): all 5 steps boot, flow
-  task completes 8/8, reassembly ends reassembled, kiosk reset leaves no residue, no dev
-  hooks in student mode, 25 draw calls / ~148k triangles.
-- **Open defect**: the reading card still overlaps ≈14% of the exploded cloud in angular
-  view space (measured today: 14.6° elevation × 14.4° azimuth). Better than a centred
-  card, not yet clean. See [readability](quest2-readability.md#cards-vs-the-organ).
+- **P2 lesson runtime built and desktop-verified**: all 5 steps boot, the flow task
+  completes 8/8, reassembly ends reassembled, kiosk reset leaves no residue, no dev hooks in
+  student mode, 25–27 draw calls / ~148k triangles.
+- **Layout defect closed.** The reading card used to hide ~14% of the exploded cloud because
+  it was placed in metres. UI is now authored in **degrees of view** and seated outside the
+  anatomy's measured angular footprint — verified **zero anatomy behind the card at all five
+  steps**. See [readability](quest2-readability.md#cards-versus-the-organ).
+- **Pointing verified through the real ray path.** A retrieval step that "passed 8/8" by
+  calling the scoring function directly was measured at 5–6/8 through the controller's own
+  ray. Parts that sit behind other parts are now faded *and* removed from the pick set, so no
+  task is a dead end: **8/8 core parts reachable**. See [gotchas](gotchas.md).
 - **Not yet done**: first real-headset pass (P3), audio cues, second body unit.
+
+## URLs
+
+| URL | Branch | What it is |
+|---|---|---|
+| <https://3dhermit.github.io/webxr-first-steps/> | `main` | the classroom lesson |
+| <https://3dhermit.github.io/webxr-first-steps/next/> | `anatomy-vr` | candidate, for side-by-side testing |
+
+Both come from one workflow and one Pages artifact — see
+[deployment](deployment.md).
 
 ## House rule
 

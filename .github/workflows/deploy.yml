@@ -1,9 +1,12 @@
 name: Build and deploy to Pages
 
 on:
-  # Runs on pushes targeting the default branch
+  # Publishes on pushes to the classroom branch AND the candidate branch, so the
+  # site is never left half-updated. One workflow owns the whole site: a free
+  # GitHub Pages site has a single artifact, so a second workflow deploying would
+  # silently delete the first one's pages.
   push:
-    branches: ['main']
+    branches: ['main', 'anatomy-vr']
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -32,29 +35,77 @@ jobs:
         node-version: [20.x]
 
     steps:
-      - uses: actions/checkout@v4
+      # Always publish BOTH copies in one artifact: main at the site root (the URL a
+      # class uses) and the candidate branch under /next/, so a teacher can hold the
+      # live lesson and the next version on two headsets and merge only what works.
+      # The subpath works because webpack sets no publicPath and every asset loads
+      # relatively — if absolute paths appear, /next/ breaks here, in CI, first.
+      - name: Check out the classroom version (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: live
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-
-      - name: Install
-        run: npm ci
+          cache: npm
+          cache-dependency-path: live/package-lock.json
 
       # Lesson JSON is student-facing content. Gate the deploy on it being coherent
       # with the geometry registry, or a typo in a prompt ships to a classroom.
-      - name: Validate lesson content
+      - name: Validate classroom lesson content
+        working-directory: live
         run: npm run validate
 
-      - name: Build
-        run: npm run build
+      - name: Build classroom version
+        working-directory: live
+        run: |
+          npm ci
+          npm run build
+
+      - name: Does a candidate branch exist?
+        id: cand
+        run: |
+          if git ls-remote --exit-code --heads origin anatomy-vr >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the candidate branch
+        if: steps.cand.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: anatomy-vr
+          path: cand
+
+      - name: Validate candidate lesson content
+        if: steps.cand.outputs.exists == 'true'
+        working-directory: cand
+        run: npm run validate
+
+      - name: Build candidate
+        if: steps.cand.outputs.exists == 'true'
+        working-directory: cand
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp -r live/dist/. site/
+          if [ '${{ steps.cand.outputs.exists }}' = 'true' ]; then
+            mkdir -p site/next
+            cp -r cand/dist/. site/next/
+          fi
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: './dist'
+          path: 'site'
 
       - name: Deploy to GitHub Pages
         id: deployment
