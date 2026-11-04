@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>anatomy probe — heart-male registry</title>
+<style>
+  body { margin:0; font:13px/1.4 system-ui; background:#111; color:#eee; }
+  #hud { position:fixed; left:8px; top:8px; background:#000a; padding:8px 10px; white-space:pre; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const hud = (t) => { document.getElementById('hud').textContent = t; };
+window.addEventListener('error', (e) => hud('ERROR: ' + (e.message || '?') + '\n' + (e.error && e.error.stack ? e.error.stack.split('\n').slice(0,4).join('\n') : (e.filename || ''))));
+window.addEventListener('unhandledrejection', (e) => hud('REJECT: ' + ((e.reason && e.reason.message) || e.reason) + '\n' + ((e.reason && e.reason.stack) || '').split('\n').slice(0,4).join('\n')));
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x181818);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 20);
+camera.position.set(0, 0.35, 0.55);
+const controls = new OrbitControls(camera, renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.2));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.4, 0.8, 0.6); scene.add(key);
+
+const reg = await (await fetch('/src/assets/anatomy/parts.json')).json();
+const byMesh = new Map(reg.parts.map(p => [p.mesh, p]));
+const SYS = { chamber:0x88aaff, valve:0xff7755, support:0xffcc44, organ:0x99ff99 };
+// A system palette gives only 3 hues for 14 parts — visually unreadable. Jitter the hue per
+// part so every part reads as its own object, while hue still cues the system.
+const HUE = { chamber:0.60, valve:0.045, support:0.135, organ:0.35 };
+let hueIdx = 0;
+
+const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);          // required by EXT_meshopt_compression
+const gltf = await loader.loadAsync('/src/assets/anatomy/heart-male.opt.glb');
+
+// Do NOT flatten for explode. KHR_mesh_quantization puts the dequantization scale on
+// ANCESTOR nodes, so reparenting meshes and resetting their TRS (scale=1) inflates geometry
+// ~10x and collapses every part onto the same point. Keep the glTF hierarchy; explode only
+// needs each leaf mesh's own LOCAL position and a world->parent-local offset.
+const parts = [];
+const found = [];
+gltf.scene.updateMatrixWorld(true);
+gltf.scene.traverse((n) => { if (n.isMesh) found.push(n); });   // collect, never mutate mid-walk
+const inv = new THREE.Matrix4();
+for (const n of found) {
+  n.material = n.material.clone();                  // heart_mat is SHARED by all 14 parts
+  const spec = byMesh.get(n.name) || null;
+  n.material.color.setHSL(HUE[spec ? spec.system : 'organ'] + (hueIdx++ % 5) * 0.032, 0.6, 0.55);
+  n.material.roughness = 0.55;
+  n.userData.home = n.position.clone();             // local space, as authored
+  n.userData.spec = spec;
+  if (spec) {
+    inv.copy(n.parent.matrixWorld).invert();
+    const a = new THREE.Vector3(0, 0, 0).applyMatrix4(inv);
+    const b = new THREE.Vector3(spec.out[0], spec.out[1], spec.out[2]).applyMatrix4(inv);
+    n.userData.localOut = b.sub(a);                 // carries parent scale; do not normalise
+  }
+  parts.push(n);
+}
+scene.add(gltf.scene);
+
+// recentre + scale up for tabletop viewing (true size is ~12 cm)
+const model = gltf.scene;
+const box = new THREE.Box3().setFromObject(model);
+const c = box.getCenter(new THREE.Vector3());
+const VIEW = 0.34; model.scale.setScalar(VIEW / box.getSize(new THREE.Vector3()).length());
+model.position.sub(c.multiplyScalar(model.scale.x));
+
+// Explode gain + auto-framing. Bounding-sphere clearance over-separates shell-like parts
+// (a ventricle shell and its papillary muscles should stay roughly co-axial), and at gain 1
+// the layout spans 1.18 m — parts leave the frustum (draw calls dropped 14 -> 11) and sit
+// beyond arm's reach for a seated VR user. Keep the exploded extent within ~0.6 m.
+const GAIN = 0.55;
+function fit() {
+  applyFactor(1);
+  const b = new THREE.Box3().setFromObject(model);
+  const size = b.getSize(new THREE.Vector3()).length();
+  const dist = (size / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15;
+  const ctr = b.getCenter(new THREE.Vector3());
+  camera.position.set(ctr.x, ctr.y + size * 0.18, ctr.z + dist);
+  controls.target.copy(ctr);
+  return { explodedExtent: +size.toFixed(3), cameraDist: +dist.toFixed(3) };
+}
+
+// Explode: one scalar, offsets in metres (the registry's spreads are metres).
+// setFactor is exposed for automated checks — rAF is throttled in a background/occluded
+// tab, so an animation-driven check is not deterministic.
+let factor = 0;
+const tmp = new THREE.Vector3();
+function applyFactor(f) {
+  factor = f;
+  for (const n of parts) {
+    const s = n.userData.spec; if (!s) continue;
+    n.position.copy(n.userData.home).addScaledVector(n.userData.localOut, s.spread * f * GAIN);
+  }
+}
+function report() {
+  const info = renderer.info;
+  hud(`r${THREE.REVISION}  factor ${factor.toFixed(2)}
+draw calls      ${info.render.calls}
+triangles       ${info.render.triangles}
+parts           ${parts.length}   registry ${reg.parts.length}
+ontology ids    ${window.__xr.ids.length}/${parts.length}
+materials       ${new Set(parts.map(p => p.material.uuid)).size} (cloned per part)
+solver overlaps ${reg.explodeSolve.overlapBefore} -> ${reg.explodeSolve.overlapAfter}  max spread ${Math.max(...reg.parts.map(p=>p.spread)).toFixed(3)} m
+budget          calls<100 ${info.render.calls < 100 ? 'OK' : 'OVER'}  tris<750000 ${info.render.triangles < 750000 ? 'OK' : 'OVER'}`);
+}
+const clock = new THREE.Clock();
+const fitInfo = fit();                       // frame on the exploded extent, then start closed
+applyFactor(0);
+window.__xr = { THREE, renderer, scene, camera, parts, fitInfo, get factor() { return factor; },
+  ids: parts.map(p => p.userData.spec && p.userData.spec.id).filter(Boolean),
+  setFactor(f) { applyFactor(f); renderer.render(scene, camera); report(); return factor; } };
+function frame() {
+  applyFactor(factor + (1 - factor) * Math.min(1, clock.getDelta() * 2.2));
+  controls.update();
+  renderer.render(scene, camera);
+  report();
+  requestAnimationFrame(frame);
+}
+frame();
+addEventListener('keydown', (e) => { if (e.key === ' ') applyFactor(factor > 0.5 ? 0 : 1); });
+</script>
+</body>
+</html>

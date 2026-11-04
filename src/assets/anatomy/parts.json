@@ -1,0 +1,370 @@
+{
+  "source": "HuBMAP Human Reference Atlas heart-male v1.3, CC BY 4.0",
+  "model": "src/assets/anatomy/heart-male.opt.glb",
+  "modelCenter": [
+    0.0191,
+    0.4698,
+    0.0425
+  ],
+  "totalTriangles": 164119,
+  "explodeSolve": {
+    "parts": 14,
+    "pairs": 91,
+    "overlapBefore": 10,
+    "overlapAfter": 0,
+    "minSeparationRatio": 0.074,
+    "clearanceAfter": 1
+  },
+  "parts": [
+    {
+      "id": "UBERON:0002078",
+      "mesh": "VH_M_right_cardiac_atrium",
+      "label": "right cardiac atrium",
+      "system": "chamber",
+      "center": [
+        -0.0174,
+        0.4809,
+        0.0344
+      ],
+      "size": [
+        0.0521,
+        0.0958,
+        0.0628
+      ],
+      "triangles": 48186,
+      "out": [
+        -0.097,
+        0.729,
+        -0.678
+      ],
+      "spread": 0.35,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002079",
+      "mesh": "VH_M_left_cardiac_atrium",
+      "label": "left cardiac atrium",
+      "system": "chamber",
+      "center": [
+        0.0044,
+        0.4926,
+        0.0085
+      ],
+      "size": [
+        0.073,
+        0.0722,
+        0.047
+      ],
+      "triangles": 33946,
+      "out": [
+        0.286,
+        0.575,
+        -0.767
+      ],
+      "spread": 0.204,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002080",
+      "mesh": "VH_M_heart_right_ventricle",
+      "label": "heart right ventricle",
+      "system": "chamber",
+      "center": [
+        0.0177,
+        0.4722,
+        0.0575
+      ],
+      "size": [
+        0.0831,
+        0.0977,
+        0.0653
+      ],
+      "triangles": 27622,
+      "out": [
+        -0.099,
+        -0.994,
+        0.039
+      ],
+      "spread": 0.216,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002146",
+      "mesh": "VH_M_pulmonary_valve",
+      "label": "pulmonary valve",
+      "system": "valve",
+      "center": [
+        0.0172,
+        0.5085,
+        0.0423
+      ],
+      "size": [
+        0.0257,
+        0.0242,
+        0.023
+      ],
+      "triangles": 13288,
+      "out": [
+        -0.002,
+        1,
+        0
+      ],
+      "spread": 0.141,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002134",
+      "mesh": "VH_M_tricuspid_valve",
+      "label": "tricuspid valve",
+      "system": "valve",
+      "center": [
+        -0.0055,
+        0.4599,
+        0.0457
+      ],
+      "size": [
+        0.0377,
+        0.0462,
+        0.0376
+      ],
+      "triangles": 12490,
+      "out": [
+        -0.02,
+        1,
+        0.003
+      ],
+      "spread": 0.243,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002084",
+      "mesh": "VH_M_heart_left_ventricle",
+      "label": "heart left ventricle",
+      "system": "chamber",
+      "center": [
+        0.0427,
+        0.4643,
+        0.0415
+      ],
+      "size": [
+        0.0764,
+        0.0768,
+        0.0926
+      ],
+      "triangles": 9350,
+      "out": [
+        0.019,
+        -1,
+        -0.001
+      ],
+      "spread": 0.35,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002094",
+      "mesh": "VH_M_interventricular_septum",
+      "label": "interventricular septum",
+      "system": "chamber",
+      "center": [
+        0.0326,
+        0.4633,
+        0.0501
+      ],
+      "size": [
+        0.0519,
+        0.0725,
+        0.0668
+      ],
+      "triangles": 8074,
+      "out": [
+        -1,
+        -0.005,
+        0.006
+      ],
+      "spread": 0.265,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002135",
+      "mesh": "VH_M_mitral_valve",
+      "label": "mitral valve",
+      "system": "valve",
+      "center": [
+        0.0227,
+        0.4771,
+        0.0117
+      ],
+      "size": [
+        0.0366,
+        0.0411,
+        0.0305
+      ],
+      "triangles": 6468,
+      "out": [
+        0.003,
+        1,
+        -0.025
+      ],
+      "spread": 0.272,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "UBERON:0002137",
+      "mesh": "VH_M_aortic_valve",
+      "label": "aortic valve",
+      "system": "valve",
+      "center": [
+        0.0068,
+        0.4992,
+        0.0286
+      ],
+      "size": [
+        0.0247,
+        0.0254,
+        0.0215
+      ],
+      "triangles": 2680,
+      "out": [
+        -0.01,
+        1,
+        -0.011
+      ],
+      "spread": 0.108,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "FMA:7264",
+      "mesh": "VH_M_papillary_muscle_of_heart_anterior",
+      "label": "Anterior papillary muscle of left ventricle",
+      "system": "support",
+      "center": [
+        0.019,
+        0.453,
+        0.0771
+      ],
+      "size": [
+        0.0233,
+        0.0144,
+        0.0164
+      ],
+      "triangles": 638,
+      "out": [
+        0.192,
+        -0.785,
+        0.589
+      ],
+      "spread": 0.096,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "FMA:7267",
+      "mesh": "VH_M_papillary_muscle_of_heart_posteromedial",
+      "label": "Posteromedial head of posterior papillary muscle of left ventricle",
+      "system": "support",
+      "center": [
+        0.0455,
+        0.4583,
+        0.0419
+      ],
+      "size": [
+        0.0272,
+        0.0126,
+        0.0337
+      ],
+      "triangles": 576,
+      "out": [
+        0.306,
+        -0.918,
+        -0.254
+      ],
+      "spread": 0.096,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "FMA:7265",
+      "mesh": "VH_M_papillary_muscle_of_heart_anterolateral",
+      "label": "Anterolateral head of lateral papillary muscle of left ventricle",
+      "system": "support",
+      "center": [
+        0.0455,
+        0.4693,
+        0.0419
+      ],
+      "size": [
+        0.0292,
+        0.0286,
+        0.037
+      ],
+      "triangles": 518,
+      "out": [
+        0.031,
+        -1,
+        0
+      ],
+      "spread": 0.053,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "FMA:7262",
+      "mesh": "VH_M_papillary_muscle_of_heart_medial",
+      "label": "Septal papillary muscle of right ventricle",
+      "system": "support",
+      "center": [
+        0.0244,
+        0.444,
+        0.0546
+      ],
+      "size": [
+        0.0063,
+        0.0061,
+        0.0085
+      ],
+      "triangles": 152,
+      "out": [
+        0.313,
+        -0.95,
+        0.011
+      ],
+      "spread": 0.115,
+      "fact": "",
+      "quiz": ""
+    },
+    {
+      "id": "FMA:7261",
+      "mesh": "VH_M_papillary_muscle_of_heart_posterior",
+      "label": "Posterior papillary muscle of right ventricle",
+      "system": "support",
+      "center": [
+        0.0126,
+        0.4341,
+        0.0587
+      ],
+      "size": [
+        0.0084,
+        0.0055,
+        0.0068
+      ],
+      "triangles": 131,
+      "out": [
+        -0.117,
+        -0.94,
+        -0.321
+      ],
+      "spread": 0.091,
+      "fact": "",
+      "quiz": ""
+    }
+  ]
+}
