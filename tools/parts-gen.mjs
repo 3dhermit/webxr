@@ -98,8 +98,10 @@ for (const r of recs) {
   parts.push({ id:(ex.ontologyid||r.OntologyID||'').trim(), mesh:r.node_name,
     label:(ex.label||r.label||r.node_name), system:sys,
     center:gm.center.map(x=>+x.toFixed(4)), size:gm.size,
-    triangles:gm.tris, out, spread:+(0.12 + span * 2).toFixed(3),
-    fact:'', quiz:'' });
+    triangles:gm.tris, out, spread:+(0.12 + span * 2).toFixed(3) });
+  // NOTE: no teaching text here. Facts, labels-for-students, quiz items and misconceptions are
+  // authored (and cited) in src/lessons/*.json; this file is geometry + identity only, so it can
+  // be regenerated from a new GLB without throwing away human-written content.
 }
 // --- auto-explode solver: grow each part's spread until no pair overlaps ---
 // Each part can only move along its own `out` axis, so the required separation is

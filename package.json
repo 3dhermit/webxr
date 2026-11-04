@@ -16,6 +16,8 @@
 	"scripts": {
 		"build": "webpack",
 		"dev": "webpack serve",
+		"parts": "node tools/parts-gen.mjs assets-source/heart-male.glb assets-source/heart-male.crosswalk.csv src/assets/anatomy/parts.json",
+		"validate": "node tools/validate-lesson.mjs",
 		"format": "prettier --write ./src/**/*"
 	},
 	"dependencies": {
