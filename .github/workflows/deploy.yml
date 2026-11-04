@@ -40,7 +40,12 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install
-        run: npm install
+        run: npm ci
+
+      # Lesson JSON is student-facing content. Gate the deploy on it being coherent
+      # with the geometry registry, or a typo in a prompt ships to a classroom.
+      - name: Validate lesson content
+        run: npm run validate
 
       - name: Build
         run: npm run build

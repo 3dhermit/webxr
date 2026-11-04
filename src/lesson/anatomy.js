@@ -107,6 +107,35 @@ export class AnatomyModel {
 		return target;
 	}
 
+	/**
+	 * Angular footprint of the whole cloud as seen from a point (radians).
+	 * az: negative = left of the student's view axis. el: negative = below the eye line.
+	 *
+	 * This is measured per part from the eye, not as a ring around the model centre: a part
+	 * 0.55 m from the face covers more degrees than the same part at 0.85 m, and that is the
+	 * only thing that decides whether a reading card sits BESIDE the anatomy or ON TOP of it.
+	 * Spacing computed around the model centre collapsed to ~1 degree of real gap under
+	 * perspective, which is how the label-blob bug got past a numeric check.
+	 */
+	angularExtents(eye = new THREE.Vector3()) {
+		const o = { azMin: Infinity, azMax: -Infinity, elMin: Infinity, elMax: -Infinity };
+		for (const p of this.parts.values()) {
+			const c = p.mesh.localToWorld(p.centerLocal.clone()).sub(eye);
+			const planar = Math.hypot(c.x, c.z);
+			if (planar < 1e-4) continue;
+			const r = Math.max(...p.spec.size) * 0.5 * this.group.scale.x;
+			const az = Math.atan2(c.x, -c.z);
+			const el = Math.atan2(c.y, planar);
+			const half = Math.atan2(r, Math.hypot(planar, c.y));
+			o.azMin = Math.min(o.azMin, az - half);
+			o.azMax = Math.max(o.azMax, az + half);
+			o.elMin = Math.min(o.elMin, el - half);
+			o.elMax = Math.max(o.elMax, el + half);
+		}
+		if (!Number.isFinite(o.azMin)) return { azMin: -0.2, azMax: 0.2, elMin: -0.3, elMax: 0.3 };
+		return o;
+	}
+
 	/** One scalar drives every part; per-part `outAmount` lets the reassembly task snap parts in. */
 	apply() {
 		for (const p of this.parts.values()) {
@@ -186,7 +215,7 @@ export class AnatomyModel {
 	 * Raycast helper for the controller. Small parts (the 12 mm papillary muscles) get an
 	 * enlarged invisible sphere so a student is tested on anatomy, not on aim.
 	 */
-	pick(raycaster, { hitSphereMinMetres = 0.025, only } = {}) {
+	hitList(raycaster, { hitSphereMinMetres = 0.025, only } = {}) {
 		const meshes = [];
 		const spheres = [];
 		const sv = new THREE.Vector3();
@@ -196,7 +225,12 @@ export class AnatomyModel {
 			// A part is fiddly to point at when it is small OR thin: valves are ring-shaped, so a
 			// ray through the middle of the geometry passes through the hole between leaflets.
 			const dims = p.spec.size.map((v) => v * this.group.scale.x).sort((a, b) => a - b);
-			const needsAid = dims[0] * 2 < hitSphereMinMetres * 2 || dims[2] < hitSphereMinMetres;
+			// A ring is not a solid. A valve's bounding box measures 25-46 mm and so reads "big
+			// enough", yet most of that box is the hole — and the hole is exactly where a student
+			// aims when asked to point at the valve. Hollow parts always get an aim aid. The flag
+			// comes from the registry's own system tag, so it stays data-driven.
+			const hollow = p.spec.system === 'valve';
+			const needsAid = hollow || dims[0] * 2 < hitSphereMinMetres * 2 || dims[2] < hitSphereMinMetres;
 			if (needsAid) {
 				if (!p.hit) {
 					const s = new THREE.Mesh(
@@ -217,12 +251,34 @@ export class AnatomyModel {
 				p.hit.visible = false;
 			}
 		}
-		const hits = raycaster.intersectObjects(meshes.concat(spheres), false);
-		const hit = hits[0];
+		return raycaster.intersectObjects(meshes.concat(spheres), false);
+	}
+
+	/** Which part a raycast hit belongs to — the mesh itself or one of its invisible aim aids. */
+	idOfHit(hit) {
 		if (!hit) return null;
 		if (hit.object.userData.partId) return hit.object.userData.partId;
 		for (const [id, p] of this.parts) if (p.hit === hit.object) return id;
 		return null;
+	}
+
+	/** Nearest part the ray touches. This is what a controller trigger selects. */
+	pick(raycaster, opts) {
+		return this.idOfHit(this.hitList(raycaster, opts)[0]);
+	}
+
+	/**
+	 * Every part the ray passes through, nearest first. Used to find what is standing between the
+	 * student and the part they were asked for, so the UI can get out of the way instead of leaving
+	 * the student poking a wall.
+	 */
+	pickAll(raycaster, opts) {
+		const seen = [];
+		for (const h of this.hitList(raycaster, opts)) {
+			const id = this.idOfHit(h);
+			if (id && !seen.includes(id)) seen.push(id);
+		}
+		return seen;
 	}
 
 	/** World-space centre of a part's geometry, for labels, waypoints and task anchors. */

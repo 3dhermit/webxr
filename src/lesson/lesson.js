@@ -33,15 +33,25 @@ export class Lesson {
 		this.player.add(this.root);
 
 		const u = (data.runtime || {}).ui || {};
-		this.ui = {
-			panelW: u.panelWidthMetres ?? 0.3,
-			panelZ: u.panelZMetres ?? -0.45,
-			promptY: u.promptYMetres ?? 1.42,
-			promptText: u.promptTextHeightMetres ?? 0.016,
-			feedText: u.feedbackTextHeightMetres ?? 0.015,
-			btnX: u.buttonXMetres ?? 0.24,
-			btnY: u.buttonYMetres ?? 1.18,
+		// Authored in DEGREES of view, not metres. A headset student does not see centimetres:
+		// the Quest 2 lens puts ~18.5 pixels on every degree, and any card placed in metres
+		// silently changes size the moment the model moves closer or further. Degrees are the
+		// unit the student actually experiences, so they are the unit the layout is specified in.
+		this.uiDeg = {
+			side: u.panelSide === 'right' ? 1 : -1,
+			width: u.panelAngularWidthDeg ?? 16,
+			gap: u.panelGapDeg ?? 5,
+			depth: u.panelDepthMetres ?? 0.62,
+			bottomElev: u.panelBottomElevDeg ?? -13,
+			promptText: u.promptTextDeg ?? 1.45,
+			feedText: u.feedbackTextDeg ?? 1.2,
+			btnAz: u.buttonAzDeg ?? 30,
+			btnElev: u.buttonElevDeg ?? -22,
+			btnWidth: u.buttonWidthDeg ?? 13,
+			maxAz: u.maxComfortAzDeg ?? 45,
 		};
+		this.ui = { eyeY: u.eyeHeightMetres ?? 1.45 };
+		this.planUi();
 
 		this.t = new THREE.Vector3();
 		this.ray = new THREE.Raycaster();
@@ -75,22 +85,94 @@ export class Lesson {
 		return p ? `Part of the ${p.spec.system}.` : '';
 	}
 
+	/**
+	 * Place the reading card clear of the anatomy, using the anatomy's measured angular width.
+	 *
+	 * The card used to be hand-placed in metres, and it kept landing on the organ: a 0.28 m card
+	 * at 0.34 m covers ~44 degrees of view while the exploded cloud is ~32 degrees wide, so
+	 * "off to the left by 0.16 m" still overlapped ~14% of the cloud. Here the cloud is measured
+	 * from the student's eye at the widest spread this lesson ever reaches, and the card is put
+	 * outside that band with a gap. Head turns of 25-40 degrees are free in a seated lesson;
+	 * an instruction card printed over the thing being studied is not.
+	 *
+	 * Depth sits just in front of the organ so the text does not float out into the room, and
+	 * text size is specified in degrees, which converts to a fixed pixel height on the lens
+	 * (~18.5 px/deg on Quest 2) regardless of how the model is scaled.
+	 */
+	planUi() {
+		const g = this.uiDeg;
+		const rad = (d) => (d * Math.PI) / 180;
+		const eye = new THREE.Vector3(0, this.ui.eyeY, 0);
+
+		// Measure at the widest disassembly the lesson actually asks for, not blind maximum, so
+		// the card is not pushed further away than the content needs.
+		let maxFactor = 0;
+		for (const s of this.data.steps || []) {
+			const e = s.action?.explode;
+			if (Array.isArray(e)) maxFactor = Math.max(maxFactor, ...e);
+			else if (typeof e === 'number') maxFactor = Math.max(maxFactor, e);
+		}
+		const saved = this.model.factor ?? 0;
+		this.model.setFactor(maxFactor);
+		const a = this.model.angularExtents(eye);
+		this.model.setFactor(saved);
+		this.cloudAngles = {
+			azMin: +((a.azMin * 180) / Math.PI).toFixed(1),
+			azMax: +((a.azMax * 180) / Math.PI).toFixed(1),
+		};
+
+		const gap = rad(g.gap);
+		const w = rad(g.width);
+		let side = g.side;
+		// If the chosen side would push the card's outer edge past the comfortable view cone,
+		// flip it rather than shrink the card into unreadability.
+		const edge = (s) => Math.abs((s < 0 ? a.azMin : a.azMax) + s * (gap + w));
+		if (edge(side) > rad(g.maxAz)) side = -side;
+
+		const inner = side < 0 ? a.azMin - gap : a.azMax + gap;
+		const outer = inner + side * w;
+		const p = g.depth;
+		// Cards live on a plane at z = -p. On that plane, azimuth maps to x by tan(), which is
+		// how a degrees spec becomes a position without a second source of truth.
+		const xIn = p * Math.tan(inner);
+		const xOut = p * Math.tan(outer);
+
+		this.ui.panelZ = -p;
+		this.ui.panelX = (xIn + xOut) / 2;
+		this.ui.panelW = Math.abs(xOut - xIn);
+		this.ui.promptText = p * Math.tan(rad(g.promptText));
+		this.ui.feedText = p * Math.tan(rad(g.feedText));
+		// Bottom edge pinned below the eye line; the stack grows UP from here (relayout), so a
+		// longer prompt can never extend down across the anatomy.
+		this.ui.panelBottom = this.ui.eyeY + p * Math.tan(rad(g.bottomElev));
+		this.ui.btnX = p * Math.tan(rad(g.btnAz));
+		this.ui.btnY = this.ui.eyeY + p * Math.tan(rad(g.btnElev));
+		this.ui.btnW = p * Math.tan(rad(g.btnWidth));
+	}
+
 	buildUI() {
-		const { panelW, panelZ, promptY, promptText, feedText, btnX, btnY } = this.ui;
+		const { panelW, panelZ, promptText, feedText, btnX, btnY, btnW, eyeY } = this.ui;
 		// One panel carries the step counter inside it. A separate floating counter line printed
 		// straight through the prompt panel and read as doubled text.
 		this.prompt = new Panel({ width: panelW, fontSize: promptText });
-		this.prompt.group.position.set(0, promptY, panelZ);
 		this.feedback = new Panel({ width: panelW, fontSize: feedText });
-		this.feedback.group.position.set(0, promptY - 0.12, panelZ);
-		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: 0.19, height: 0.045 });
+		// troika measures wrapped text asynchronously, so the measured height arrives after set().
+		// Re-anchor the stack each time a panel is remeasured, or the backdrop keeps the previous
+		// prompt's height and the extra lines spill off it onto the model.
+		this.prompt.onfit = () => this.relayout();
+		this.feedback.onfit = () => this.relayout();
+		this.prompt.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
+		this.feedback.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
+		// The plate is sized from the same angular spec as everything else, so it stays the same
+		// apparent size on the lens when the card moves closer to or further from the face.
+		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
 		this.continueBtn.position.set(btnX, btnY, panelZ);
 		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn);
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
 		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn];
-		for (const head of this.uiParts) head.lookAt(0, 1.45, 0);
+		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -166,6 +248,8 @@ export class Lesson {
 
 	enterStep(i) {
 		this.i = Math.max(0, Math.min(this.steps.length - 1, i));
+		// A faded-out blocker from the previous step must not silently stay out of the pick set.
+		this.blockedOut = [];
 		const st = this.steps[this.i];
 		const a = st.action || {};
 
@@ -186,6 +270,8 @@ export class Lesson {
 		if (a.flow) {
 			this.flow = { i: 0, misses: 0 };
 			this.buildWaypoints();
+			const first = this.flowParts()[0];
+			if (first) this.revealPathTo(first);
 		}
 		if (a.reassemble) {
 			this.find = { queue: this.shuffle(this.data.tiers.core.filter((id) => this.model.parts.has(id))), asked: null, misses: 0 };
@@ -209,6 +295,41 @@ export class Lesson {
 		return m ? this.textOf(m.surfaceAs) : '';
 	}
 
+	/**
+	 * Ghost whatever is blocking the line from the student's eyes to the part they were asked for.
+	 * Why this instead of rotating the heart: the left atrium really is posterior, so an anterior
+	 * view legitimately hides it — and a student who cannot point at the asked part is a stuck
+	 * student. Making the occluders translucent shows WHY it was hidden, which is the lesson.
+	 */
+	revealPathTo(id) {
+		const eye = this.camera.getWorldPosition(new THREE.Vector3());
+		const c = this.model.center(id);
+		const dir = c.clone().sub(eye);
+		const dist = dir.length();
+		if (dist < 1e-6) return [];
+		const far = this.ray.far;
+		this.ray.set(eye.clone(), dir.normalize());
+		this.ray.far = dist - 0.004;
+		const along = this.model.pickAll(this.ray);
+		this.ray.far = far;
+		const blockers = along.filter((x) => x !== id);
+		if (blockers.length) this.model.ghost(blockers, 0.3);
+		// Translucent is not enough: a see-through wall is still solid to a raycast, so the blocker
+		// must also step out of the pick set. Every other part stays pointable, so a wrong answer
+		// still means the student picked a real structure and we can name it back to them.
+		this.blockedOut = blockers;
+		return blockers;
+	}
+
+	/** Pick options for the current step: everything except what we just faded out of the way. */
+	pickOpts() {
+		const opts = { hitSphereMinMetres: this.data.runtime.hitSphereMinMetres };
+		if (this.blockedOut && this.blockedOut.length) {
+			opts.only = new Set([...this.model.parts.keys()].filter((id) => !this.blockedOut.includes(id)));
+		}
+		return opts;
+	}
+
 	nextAsk() {
 		if (!this.find.queue.length) {
 			this.find.asked = null;
@@ -221,6 +342,9 @@ export class Lesson {
 		}
 		this.find.asked = this.find.queue[0];
 		this.find.misses = 0;
+		// Get the view out of the way of whatever we just asked for, so a student is never left
+		// poking a wall because the asked part happens to sit behind another chamber.
+		this.revealPathTo(this.find.asked);
 		this.say(`Find it: ${this.partName(this.find.asked)}`, MUTED);
 		return this.find.asked;
 	}
@@ -247,9 +371,14 @@ export class Lesson {
 	}
 
 	relayout() {
-		const top = this.ui.promptY;
-		this.prompt.group.position.y = top;
-		this.feedback.group.position.y = top - this.prompt.height - 0.012;
+		// A Panel's local origin is its TOP edge, and it grows DOWNWARD. Anchor the stack by its
+		// bottom line and grow up, or a longer prompt grows straight down over the anatomy.
+		const b = this.ui.panelBottom;
+		const fh = this.feedback.height || 0.04;
+		const ph = this.prompt.height || 0.04;
+		this.feedback.group.position.y = b + fh;
+		this.prompt.group.position.y = b + fh + 0.012 + ph;
+		this.panelBottomY = b;
 	}
 
 	setContinueEnabled(on) {
@@ -327,15 +456,42 @@ export class Lesson {
 
 	hoverSay(msg) {
 		if (!this.hoverLine) {
-			this.hoverLine = makeText({ fontSize: 0.017, maxWidth: 0.4, anchorX: 'center', anchorY: 'bottom', color: 0xffffff });
-			// Above the prompt panel, from the same layout numbers, instead of hard-coded desktop
-			// coordinates — and billboarded with the rest of the UI.
-			this.hoverLine.position.set(0, this.ui.promptY + 0.075, this.ui.panelZ);
+			// Sized and placed from the same layout numbers as the card, so the hover name stays
+			// the same apparent size on the lens and never lands on the anatomy.
+			const w = this.ui.panelW;
+			this.hoverLine = makeText({
+				fontSize: this.ui.feedText,
+				maxWidth: w * 0.92,
+				anchorX: 'center',
+				anchorY: 'bottom',
+				color: 0xffffff,
+			});
+			this.hoverLine.position.set(this.ui.panelX, this.ui.panelBottom - 0.022, this.ui.panelZ);
 			this.root.add(this.hoverLine);
 			this.uiParts.push(this.hoverLine);
 		}
 		this.hoverLine.text = msg;
 		this.hoverLine.sync();
+	}
+
+	/**
+	 * Is this part actually visible from where the student is standing right now?
+	 * Casts only as far as the part itself, so anything hit nearer is genuinely in front of it.
+	 * Used to turn a failed point into an anatomy lesson instead of a dead end: in an anterior
+	 * view the atria sit BEHIND the ventricles, which is real anatomy, not a bug — and in a
+	 * headset the student can fix it themselves by leaning or walking around the table.
+	 */
+	isHiddenFromEye(id, eye) {
+		const c = this.model.center(id);
+		const dir = c.clone().sub(eye);
+		const dist = dir.length();
+		if (dist < 1e-6) return false;
+		const far = this.ray.far;
+		this.ray.set(eye.clone(), dir.normalize());
+		this.ray.far = dist - 0.004;
+		const nearer = this.model.pick(this.ray);
+		this.ray.far = far;
+		return !!nearer && nearer !== id;
 	}
 
 	/** A trigger press on a part. This is where formative feedback is produced. */
@@ -356,6 +512,7 @@ export class Lesson {
 				this.flow.misses = 0;
 				const hop = this.nextWaypointAfter(this.flow.i);
 				this.say(hop ? `${hop.label}` : `Good — ${this.partName(id)}.`, OK);
+				if (this.flow.i < want.length) this.revealPathTo(want[this.flow.i]);
 				if (this.flow.i >= want.length) {
 					this.say(`Complete. And remember: the vessel that leaves for the lungs carries LOW-oxygen blood.`, OK);
 					this.setContinueEnabled(true);
@@ -366,7 +523,17 @@ export class Lesson {
 			this.flow.misses += 1;
 			this.model.flash(id, 0xa33A2A);
 			const prev = this.partName(want[Math.max(0, this.flow.i - 1)]);
-			if (this.flow.misses > 2) this.say(`This one is the ${this.partName(expect)}.`, BAD);
+			const eye = this.camera.getWorldPosition(new THREE.Vector3());
+			if (this.isHiddenFromEye(expect, eye))
+				// Real anatomy, self-serviceable: the atria sit behind the ventricles in the view a
+				// student is given. Tell them the part is behind the heart so they move, instead of
+				// letting them poke the same wall nine times.
+				this.say(
+					`You are pointing at the ${this.partName(id)}. The ${this.partName(expect)} is deeper in — ` +
+						`blood reaches it from the lungs on the far side of the heart.`,
+					BAD,
+				);
+			else if (this.flow.misses > 2) this.say(`This one is the ${this.partName(expect)}.`, BAD);
 			else this.say(`That is the ${this.partName(id)}. Blood has just left the ${prev} — where does it go next?`, BAD);
 			this.fire('flow-miss');
 			return 'miss';
@@ -384,8 +551,18 @@ export class Lesson {
 			}
 			this.find.misses += 1;
 			this.model.flash(id, 0xa33A2A);
-			if (this.find.misses > 2) this.say(`The one you want is the ${this.partName(this.find.asked)} — it is ${this.model.parts.get(this.find.asked)?.spec.system}.`, BAD);
-			else this.say(`That is the ${this.partName(id)}. Look for the ${this.partName(this.find.asked)}.`, BAD);
+			const eye = this.camera.getWorldPosition(new THREE.Vector3());
+			const want = this.find.asked;
+			// Speak in student-facing sentences built from lesson vocab, never from a raw registry
+			// field: interpolating spec.system produced "it is chamber." for a learner.
+			if (this.isHiddenFromEye(want, eye))
+				this.say(
+					`The ${this.partName(want)} is on the far side of the heart from you — that is real ` +
+						`anatomy, the atria sit behind the ventricles. Lean around the model and point at it.`,
+					BAD,
+				);
+			else if (this.find.misses > 2) this.say(`The one you want is the ${this.partName(want)}. ${this.factFor(want)}`, BAD);
+			else this.say(`That is the ${this.partName(id)}. Look for the ${this.partName(want)}.`, BAD);
 			this.fire('name-miss');
 			return 'miss';
 		}
@@ -447,9 +624,7 @@ export class Lesson {
 			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 			this.ray.set(o, d);
-			const hit = this.model.pick(this.ray, {
-				hitSphereMinMetres: this.data.runtime.hitSphereMinMetres,
-			});
+			const hit = this.model.pick(this.ray, this.pickOpts());
 			this.hoverPart(hit);
 		}
 

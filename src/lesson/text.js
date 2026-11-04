@@ -8,6 +8,27 @@ import { Text } from 'troika-three-text';
 
 export const FONT = 'assets/SpaceMono-Bold.ttf';
 
+/**
+ * Read the block size troika measured for a Text.
+ *
+ * troika 0.49.1 has NO public `textDimensions` property — the measurements live on the private
+ * `_textRenderInfo` (see its TypesetResult: blockBounds = [minX, minY, maxX, maxY], valid only
+ * after sync() completes). Code that reads `text.textDimensions` silently gets `undefined`, and a
+ * panel sized from that falls back to a fixed height while the text keeps growing: that is the
+ * real reason instruction lines spilled over the heart on Firefox. The fallback chain here means a
+ * troika upgrade that renames the field degrades to "keep the previous size" instead of collapsing.
+ */
+export function measureText(t) {
+	const ri = t._textRenderInfo || t.textDimensions;
+	if (!ri) return null;
+	if (Array.isArray(ri.blockBounds)) {
+		const [x0, y0, x1, y1] = ri.blockBounds;
+		return { width: x1 - x0, height: y1 - y0 };
+	}
+	if (typeof ri.height === 'number') return { width: ri.width, height: ri.height };
+	return null;
+}
+
 /** A wrapped text mesh with a legibility outline (it sits over anatomy, not over a flat page). */
 export function makeText({
 	fontSize = 0.022,
@@ -16,10 +37,15 @@ export function makeText({
 	align = 'left',
 	anchorX = 'left',
 	anchorY = 'top',
+	lineHeight = 1.25,
 } = {}) {
 	const t = new Text();
 	t.font = FONT;
 	t.fontSize = fontSize;
+	// lineHeight 'normal' means the FONT's own metrics. Space Mono's are ~2.1 em, which turned a
+	// 200-character prompt into a 19-line block and made the reading card taller than the heart.
+	// Always set it explicitly when the layout budget is in degrees of view.
+	t.lineHeight = lineHeight;
 	t.maxWidth = maxWidth;
 	t.textAlign = align;
 	t.anchorX = anchorX;
@@ -59,16 +85,27 @@ export class Panel {
 	set(text, color) {
 		this.text.text = text || '';
 		if (color !== undefined) this.text.color = color;
-		this.text.sync();
-		this.fit();
+		this.fit(); // first guess with the previous measurement, so the panel never collapses
+		// troika measures wrapped text asynchronously: textDimensions is only valid after the
+		// sync completes. Fitting before that sizes the backdrop from the PREVIOUS string, so a
+		// longer prompt spills its last lines off the panel and straight over the anatomy.
+		this.text.sync(() => {
+			this.fit();
+			if (this.onfit) this.onfit();
+		});
 		return this;
 	}
 
 	/** Size the backdrop from troika's measured dimensions once the text has synced. */
 	fit() {
-		const d = this.text.textDimensions || { width: this.width, height: 0.04 };
+		const d = measureText(this.text);
+		this.measured = !!d;
+		// Until the first real measurement lands, keep the last height rather than collapsing the
+		// panel to a stub — a collapsing backdrop wipes the previous line's worth of card.
+		const h = (d ? d.height : Math.max(0.04, (this.height || 0) - this.padding * 2)) + this.padding * 2;
 		const w = this.width;
-		const h = d.height + this.padding * 2;
+		this.textHeight = d ? d.height : 0;
+		this.textWidth = d ? d.width : 0;
 		this.back.scale.set(w / this.back.geometry.parameters.width, h / this.back.geometry.parameters.height, 1);
 		this.back.position.y = -h / 2 + this.padding;
 		this.height = h;
@@ -83,7 +120,10 @@ export class Panel {
  */
 export function makeLabel(fontSize = 0.014, color = 0xffffff) {
 	const g = new THREE.Group();
-	const text = makeText({ fontSize, maxWidth: 0.16, anchorX: 'center', anchorY: 'middle', align: 'center', color });
+	// Generous maxWidth on purpose: a part name must stay on ONE line. With the label font at
+	// 0.022 m and a 0.16 m wrap, "Right atrium" broke into three stacked lines and read as a blob
+	// of text over the heart. Angular spacing (spreadAngles) handles collisions instead.
+	const text = makeText({ fontSize, maxWidth: 1.2, anchorX: 'center', anchorY: 'middle', align: 'center', color });
 	g.add(text);
 	g.userData.text = text;
 	return g;
