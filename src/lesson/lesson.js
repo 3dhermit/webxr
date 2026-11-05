@@ -345,7 +345,8 @@ export class Lesson {
 		// Get the view out of the way of whatever we just asked for, so a student is never left
 		// poking a wall because the asked part happens to sit behind another chamber.
 		this.revealPathTo(this.find.asked);
-		this.say(`Find it: ${this.partName(this.find.asked)}`, MUTED);
+		// The part name here is the task, not commentary — white, like the prompt card.
+		this.say(`Find it: ${this.partName(this.find.asked)}`, 0xffffff);
 		return this.find.asked;
 	}
 
