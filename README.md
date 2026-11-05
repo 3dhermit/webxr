@@ -2,6 +2,29 @@
     <img src="./tutorial/assets/webxr-first-steps.png" style="max-width:376px"/>
 </p>
 
+> ## ⚕️ In this fork: a classroom VR anatomy lesson
+>
+> **Live lesson (Meta Quest Browser):** <https://3dhermit.github.io/webxr-first-steps/>
+> **Candidate build for side-by-side testing:** <https://3dhermit.github.io/webxr-first-steps/next/>
+>
+> Students explore a real HuBMAP heart reference model on a virtual table, take it apart, name
+> the chambers and valves by pointing at them, trace blood flow, and put it back together.
+> 5 steps, 12 minutes, aligned to NGSS **HS-LS1-2** / **MS-LS1-3**, designed for a cart of
+> 28 headsets with no accounts and no typing.
+>
+> **Documentation lives in [`docs/`](./docs/README.md)** —
+> [architecture](./docs/architecture.md) ·
+> [asset pipeline](./docs/asset-pipeline.md) ·
+> [lesson authoring](./docs/lesson-authoring.md) ·
+> [Quest 2 readability](./docs/quest2-readability.md) ·
+> [deployment](./docs/deployment.md) ·
+> [gotchas](./docs/gotchas.md).
+> (GitHub's Wiki tab is disabled on forks, so the docs are versioned with the code they
+> describe — they ship and break together.)
+>
+> The original **WebXR First Steps** tutorial below is untouched and still runs at
+> <https://3dhermit.github.io/webxr-first-steps/?demo=tutorial>.
+
 Welcome to **WebXR First Steps**! This **2-hour** tutorial is designed to help you take your first steps into developing immersive WebXR experiences using [Three.js](https://threejs.org/). Whether you’re a web developer looking to expand your skillset or a hobbyist interested in creating virtual reality (VR) applications, this tutorial will guide you through the fundamentals of building interactive 3D worlds for the web.
 
 ## What You’ll Build
