@@ -109,5 +109,35 @@ explicit `clearSay()`.
 
 Two passes in this project were **false greens**: retrieval "8/8" that never went through a
 ray, and a card "fit" check reading a nonexistent property. Both looked like passes. The
-rule that came out of them: *test through the path the user's actual input takes, and assert
+The rule that came out of them: *test through the path the user's actual input takes, and assert
 on measured values, never on the absence of an error.*
+
+## Deployment and CI
+
+**Only the default branch may publish to GitHub Pages.** The auto-created `github-pages`
+environment rejects deployments from any other branch —
+`Branch "x" is not allowed to deploy to github-pages due to environment protection rules` —
+and the run dies in ~3 seconds. Worse, with `concurrency.cancel-in-progress: true` a
+branch-triggered run can **cancel the in-flight `main` deploy**, so the site silently freezes
+at an older build while CI turns red. Split the workflow: branch pushes build and validate,
+`main` publishes.
+
+**One Pages site = one artifact.** Two workflows each calling `upload-pages-artifact` +
+`deploy-pages` don't produce two preview URLs; the last one to finish overwrites the whole
+site. To serve `main` at `/` and a candidate at `/next/`, one job must build both and stage
+them into a single artifact.
+
+**`actions/checkout` with `path:` leaves the workspace root out of git.** Any later step that
+runs a git command (`git ls-remote`, `git rev-parse`) fails with `fatal: not a git repository`
+unless that step also sets `working-directory: <checkout-dir>`. This fails the job before
+anything uploads, which looks identical to "the deploy is just slow".
+
+**A hand-written script tag in an HTML template is a production 404.** `HtmlWebpackPlugin`
+injects the bundle itself; the scaffold's `<script src="./index.js">` only ever resolved under
+the dev server, so every classroom page load started with a 404. Check the **built** `dist`
+for tags you didn't mean to ship.
+
+**Verify a deploy by content, not status code.** A Pages URL returns 200 for whatever is
+currently published, so a stale build looks healthy. Compare the served bytes against the
+local build, or grep the served HTML for a marker string introduced in the commit you are
+testing, and check `responseStatus` on every request the page makes.

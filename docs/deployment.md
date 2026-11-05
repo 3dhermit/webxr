@@ -26,6 +26,30 @@ relatively. If absolute paths appear, `/next/` breaks first — in CI, before a 
 **Deploys are gated on content**: `npm run validate` runs before build, for both copies. A
 malformed `heart.json` would otherwise ship silently to 28 headsets.
 
+### Who is allowed to publish (this one bites)
+
+GitHub's auto-created `github-pages` environment accepts deployments **only from the default
+branch**. A workflow run triggered on `anatomy-vr` therefore fails at the deploy step in
+about three seconds:
+
+> Branch "anatomy-vr" is not allowed to deploy to github-pages due to environment protection rules.
+
+That failure is worse than it looks. With `cancel-in-progress: true`, a branch-triggered run
+can cancel the in-flight `main` run, so the site silently stops updating while CI shows a
+wall of red. The workflow is split accordingly:
+
+| Push to | What happens |
+|---|---|
+| `main` | builds **both** copies, publishes the combined site |
+| `anatomy-vr` | install + validate + build only (a real check), **no publish** |
+
+So the preview at `/next/` refreshes on the next publish from `main` — which is also when you
+would decide to merge the candidate anyway. If you want the preview refreshed before merging,
+push a small commit to `main` (a docs bump works) or run the workflow manually from the
+Actions tab **with main selected**. Publishing from a branch is possible too, by adding that
+branch under Settings → Environments → `github-pages` → Deployment branches, but one publish
+point stays easier to reason about.
+
 ## The three dev loops
 
 1. **Local desktop** (`npm run dev` → `https://localhost:8081`, or `npm run build` + a

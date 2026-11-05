@@ -51,8 +51,12 @@ Hand both links to a colleague and compare them on hardware:
 
 This exists because a free GitHub Pages site has **one** deployment per repo, not one per
 branch. So one workflow builds both copies and publishes a single artifact: `main` at the
-root, `anatomy-vr` at `/next/`. Push to either branch and the site stays consistent — a
-second workflow publishing separately would silently delete the first one's pages.
+root, `anatomy-vr` at `/next/`.
+
+One rule to know: **only `main` may publish.** GitHub's `github-pages` environment rejects
+deployments from other branches, so a push to `anatomy-vr` runs a build+validate *check* and
+the `/next/` preview refreshes on the next publish from `main`. Full explanation in
+[deployment](deployment.md#who-is-allowed-to-publish-this-one-bites).
 
 Add `?v=heart1` to the classroom URL to defeat headset caching after a change. Tag the
 lesson version in git (`git tag heart-lesson-v1`) and the tag becomes the thing you name in

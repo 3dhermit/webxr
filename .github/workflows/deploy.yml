@@ -1,10 +1,8 @@
 name: Build and deploy to Pages
 
 on:
-  # Publishes on pushes to the classroom branch AND the candidate branch, so the
-  # site is never left half-updated. One workflow owns the whole site: a free
-  # GitHub Pages site has a single artifact, so a second workflow deploying would
-  # silently delete the first one's pages.
+  # Runs on pushes to the classroom branch (which publishes) and the candidate branch
+  # (which is only checked, never published — see the jobs below for why).
   push:
     branches: ['main', 'anatomy-vr']
 
@@ -17,13 +15,37 @@ permissions:
   pages: write
   id-token: write
 
-# Allow one concurrent deployment
+# Serialize per branch. Only main publishes, so two runs can never race on the Pages
+# artifact — and a candidate-branch check can no longer cancel a publish in flight
+# (a shared group with cancel-in-progress did exactly that).
 concurrency:
-  group: 'pages'
+  group: 'pages-${{ github.ref }}'
   cancel-in-progress: true
 
 jobs:
+  # A push to the candidate branch gets a genuine CI check (install, validate, build)
+  # but NO publish. GitHub's auto-created `github-pages` environment refuses deployments
+  # from any branch other than the default one, so a branch-triggered deploy fails in
+  # seconds — and with cancel-in-progress it can cancel the main deploy too, silently
+  # freezing the site at an older build. Publish rights belong to main; the candidate
+  # branch proves itself in CI and reaches /next/ on the next publish from main.
+  check-candidate:
+    if: github.ref == 'refs/heads/anatomy-vr'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+      - name: Validate lesson content
+        run: npm run validate
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+
   deploy:
+    if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
