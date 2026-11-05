@@ -40,6 +40,9 @@
 				>webxr-first-steps</a
 			>&nbsp;(MIT)
 		</div>
-		<script type="module" src="./index.js"></script>
+		<!-- No script tag here on purpose: HtmlWebpackPlugin injects index.bundle.js into this
+		     template for both dev and build. The hand-written ./index.js tag this replaces only
+		     ever resolved under the dev server, so on GitHub Pages every classroom load began
+		     with a 404. -->
 	</body>
 </html>
