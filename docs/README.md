@@ -40,6 +40,31 @@ Four entry modes on one page (all query-string, no builds per audience):
 | [Deployment & dev loops](deployment.md) | Pages, the `/next/` preview, the three dev loops, kiosk rollout |
 | [Gotchas](gotchas.md) | the bug catalog — every one of these cost real debugging time |
 
+## Two headsets, two URLs
+
+Hand both links to a colleague and compare them on hardware:
+
+| URL | Built from | Use it for |
+|---|---|---|
+| `https://3dhermit.github.io/webxr-first-steps/` | `main` | **the lesson a class gets.** Treat this branch as "shipped". |
+| `https://3dhermit.github.io/webxr-first-steps/next/` | `anatomy-vr` | a candidate under test — new step, new wording, new asset |
+
+This exists because a free GitHub Pages site has **one** deployment per repo, not one per
+branch. So one workflow builds both copies and publishes a single artifact: `main` at the
+root, `anatomy-vr` at `/next/`. Push to either branch and the site stays consistent — a
+second workflow publishing separately would silently delete the first one's pages.
+
+Add `?v=heart1` to the classroom URL to defeat headset caching after a change. Tag the
+lesson version in git (`git tag heart-lesson-v1`) and the tag becomes the thing you name in
+a staff meeting; the URL never has to change.
+
+**Deploys are gated on content.** `npm run validate` runs before build, for both copies.
+Malformed lesson JSON fails the deploy instead of appearing in front of 28 students.
+
+**Check the school network before promising the link.** Many school Wi-Fi networks block
+`github.io`. Test from the classroom network on day one, and keep the LAN dev server path
+([deployment](deployment.md)) as the fallback.
+
 ## Status (2026-11-04)
 
 - **P0/P1 complete**: repo builds and runs; HuBMAP heart asset ingested, optimized
