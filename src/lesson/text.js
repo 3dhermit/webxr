@@ -100,6 +100,19 @@ export class Panel {
 	fit() {
 		const d = measureText(this.text);
 		this.measured = !!d;
+		// An empty panel must not leave a floating black box on the card stack. Before a step
+		// has anything to say — and after clearSay() — the feedback card had no text but still
+		// drew its minimum backdrop and reserved its slot, which read as a black rectangle
+		// biting into the bottom of the instruction card.
+		if (!(this.text.text || '').trim()) {
+			this.back.visible = false;
+			this.back.scale.set(0, 0, 1);
+			this.height = 0;
+			this.textHeight = 0;
+			this.textWidth = 0;
+			return this;
+		}
+		this.back.visible = true;
 		// Until the first real measurement lands, keep the last height rather than collapsing the
 		// panel to a stub — a collapsing backdrop wipes the previous line's worth of card.
 		const h = (d ? d.height : Math.max(0.04, (this.height || 0) - this.padding * 2)) + this.padding * 2;

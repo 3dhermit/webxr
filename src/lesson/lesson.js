@@ -374,10 +374,18 @@ export class Lesson {
 		// A Panel's local origin is its TOP edge, and it grows DOWNWARD. Anchor the stack by its
 		// bottom line and grow up, or a longer prompt grows straight down over the anatomy.
 		const b = this.ui.panelBottom;
-		const fh = this.feedback.height || 0.04;
+		// Heights are measured, and an empty panel now reports height 0 with no backdrop, so the
+		// prompt card drops onto the stack's bottom line instead of leaving a reserved slot (and
+		// a visible gap) for a card that says nothing.
+		const fh = this.feedback.height || 0;
 		const ph = this.prompt.height || 0.04;
+		const gap = fh ? 0.012 : 0;
+		// Derive visibility here rather than trusting fit(): a step entry that clears the text
+		// directly (not through set()) never re-fits, leaving a stale visible flag on a
+		// zero-scaled backdrop that would reappear if anything else touched that scale.
+		this.feedback.back.visible = fh > 0;
 		this.feedback.group.position.y = b + fh;
-		this.prompt.group.position.y = b + fh + 0.012 + ph;
+		this.prompt.group.position.y = b + fh + gap + ph;
 		this.panelBottomY = b;
 	}
 

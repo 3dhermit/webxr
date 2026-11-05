@@ -141,3 +141,11 @@ for tags you didn't mean to ship.
 currently published, so a stale build looks healthy. Compare the served bytes against the
 local build, or grep the served HTML for a marker string introduced in the commit you are
 testing, and check `responseStatus` on every request the page makes.
+
+**An empty panel is still a panel.** The feedback card had no text but kept its minimum
+backdrop and its slot in the stack, so a black rectangle sat under the instruction card —
+invisible in the numbers (`height 0`, backdrop scaled to zero) and obvious on screen. Derive
+a decoration's visibility from the content it decorates, and re-derive it on every relayout
+rather than trusting the last fit: a step that clears text directly never re-fits, leaving a
+stale flag. Measure **panel-vs-panel** overlap too, not just panel-vs-model — the first
+regression only checked the card against the anatomy and passed while two cards touched.
