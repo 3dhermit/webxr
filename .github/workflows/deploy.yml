@@ -67,6 +67,9 @@ jobs:
 
       - name: Does a candidate branch exist?
         id: cand
+        # Must run inside the checkout: the workspace root itself is not a git
+        # repository, because every step below works in live/ or cand/.
+        working-directory: live
         run: |
           if git ls-remote --exit-code --heads origin anatomy-vr >/dev/null 2>&1; then
             echo 'exists=true' >> "$GITHUB_OUTPUT"
