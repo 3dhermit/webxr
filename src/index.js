@@ -14,6 +14,7 @@ import * as THREE from 'three';
 
 import { AnatomyModel } from './lesson/anatomy.js';
 import { Lesson } from './lesson/lesson.js';
+import { Tuner } from './lesson/tune.js';
 import { XR_BUTTONS } from 'gamepad-wrapper';
 import { init } from './init.js';
 import lessonData from './lessons/heart.json';
@@ -22,12 +23,15 @@ import registry from './assets/anatomy/parts.json';
 
 const params = new URLSearchParams(window.location.search);
 const DEBUG = params.get('debug') === '1';
+// Developer surface for the in-headset ergonomics pass. Never set in a classroom build.
+const TUNE = params.get('tune') === '1';
 
 let g; // { scene, camera, renderer, player, controllers }, filled by init()
 let model;
 let lesson;
 let status;
 let hud;
+let tuner;
 let ready = false;
 // Defect #3: the lesson UI is planned around an authored 1.45 m eye height. Measure the
 // student's real one from the headset instead. Samples are collected over the first XR
@@ -61,10 +65,14 @@ async function boot() {
 
 	status.visible = false;
 	lesson.enterStep(0);
+	if (TUNE) {
+		tuner = new Tuner({ lesson, camera: g.camera, parent: g.player });
+		window.__tuner = tuner;
+	}
 	ready = true;
 
 	// Dev hooks, student-mode-clean: a headset student gets no developer surface at all.
-	if (DEBUG) {
+	if (DEBUG || TUNE) {
 		window.__lesson = lesson;
 		window.__anatomy = model;
 		window.__scene = g.scene;
@@ -160,6 +168,7 @@ function onFrame(delta, _time, globals) {
 	}
 
 	lesson.update(delta, controllers);
+	if (tuner) tuner.update(delta, controllers);
 
 	const ct = controllers.right || controllers.left;
 	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {

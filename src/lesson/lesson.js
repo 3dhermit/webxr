@@ -54,6 +54,11 @@ export class Lesson {
 		this.ui = { eyeY: u.eyeHeightMetres ?? 1.45 };
 		this.planUi();
 
+		// Named so the in-headset tuner can change plate size/spacing without a rebuild of
+		// anything but the UI itself.
+		this.quizPlateMul = (data.runtime || {}).ui?.quizPlateMul ?? 2.6;
+		this.quizPitchMul = (data.runtime || {}).ui?.quizPitchMul ?? 1.22;
+
 		this.t = new THREE.Vector3();
 		this.ray = new THREE.Raycaster();
 		this.hover = null;
@@ -262,7 +267,7 @@ export class Lesson {
 		this.quizGroup = new THREE.Group();
 		this.quizPlates = [];
 		const qw = this.ui.panelW * 0.98;
-		const qh = this.ui.feedText * 2.6;
+		const qh = this.ui.feedText * this.quizPlateMul;
 		for (let i = 0; i < 4; i++) {
 			const plate = makeButton({ label: '', width: qw, height: qh, fontSize: this.ui.feedText * 0.92 });
 			plate.userData.choice = i;
@@ -276,6 +281,38 @@ export class Lesson {
 		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge];
 		this.applyUiLayout();
 		for (const head of this.uiParts) head.lookAt(0, this.ui.eyeY, 0);
+	}
+
+	/**
+	 * Tear the UI down and rebuild it from the current numbers. Needed only for tuning: a
+	 * Panel's backdrop geometry and a troika Text's font size are both fixed at construction,
+	 * so a live text-size change cannot be applied in place. Re-enters the current step to
+	 * repopulate the cards, which is why this is a tuning path and not a runtime one.
+	 */
+	rebuildUI() {
+		const old = [
+			this.prompt?.group,
+			this.feedback?.group,
+			this.continueBtn,
+			this.calloutPanel?.group,
+			this.calloutLine,
+			this.badge,
+			this.quizGroup,
+			this.hoverLine,
+		].filter(Boolean);
+		for (const o of old) {
+			this.root.remove(o);
+			o.traverse?.((c) => {
+				c.geometry?.dispose?.();
+				c.material?.dispose?.();
+				if (c !== o) c.dispose?.();
+			});
+		}
+		this.hoverLine = null;
+		this.badgeKind = null;
+		this.quizHover = null;
+		this.buildUI();
+		this.enterStep(this.i);
 	}
 
 	/**
@@ -519,8 +556,8 @@ export class Lesson {
 	 * does not use, measured from the same angular spec as everything else.
 	 */
 	placeQuiz() {
-		const qh = this.ui.feedText * 2.6;
-		const pitch = qh * 1.22;
+		const qh = this.ui.feedText * this.quizPlateMul;
+		const pitch = qh * this.quizPitchMul;
 		const top = this.ui.eyeY + this.ui.panelZ * Math.tan(THREE.MathUtils.degToRad(-4));
 		this.quizPlates.forEach((pl, i) => {
 			pl.position.set(this.ui.calloutX, top - i * pitch, this.ui.panelZ);
