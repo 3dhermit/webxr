@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { Panel, makeButton, makeLabel, makeLeaderLine, makeText, updateLeaderLine } from './text.js';
+import { VideoScreen } from './video.js';
 
 const OK = 0x8fe3a0;
 const BAD = 0xff9a8a;
@@ -94,6 +95,16 @@ export class Lesson {
 			});
 			this.calloutDots.push(dot);
 		}
+
+		// F2: the flat video pop-up. Lives in the same space as the camera so it can be placed
+		// from the camera's local transform without a world-matrix round trip.
+		this.video = new VideoScreen({
+			camera: this.camera,
+			parent: this.player,
+			videos: data.videos || {},
+			runtime: (data.runtime || {}).ui || {},
+		});
+		this.videoFromCallout = null;
 
 		this.buildUI();
 	}
@@ -406,8 +417,100 @@ export class Lesson {
 	/** Trigger handler for callouts. Returns true when the press was consumed. */
 	pressCallout() {
 		if (this.calloutHover == null) return false;
-		if (this.calloutOpen === this.calloutHover) this.closeCallout();
-		else this.openCallout(this.calloutHover);
+		if (this.calloutOpen === this.calloutHover) {
+			this.closeCallout();
+			return true;
+		}
+		const c = this.callouts[this.calloutHover];
+		// A callout that carries a clip plays it instead of showing its card. The card is not
+		// lost: closeVideo() opens it afterwards, so the student gets the footage and then the
+		// written explanation rather than one covering the other.
+		if (c?.spec.video && this.openVideo(c.spec.video, c.spec.videoAt)) {
+			this.videoFromCallout = this.calloutHover;
+			this.closeCallout();
+			return true;
+		}
+		this.openCallout(this.calloutHover);
+		return true;
+	}
+
+	/**
+	 * Everything the lesson draws that is NEARER than the video panel, and would therefore
+	 * punch through it. The clip sits at ~1.35 m while the cards sit at ~0.62 m and the
+	 * anatomy nearer still, so without this the student watches a lecture with a prompt card
+	 * and a callout dot floating on top of the footage.
+	 */
+	videoMaskTargets() {
+		return [
+			this.model.group,
+			this.labelGroup,
+			this.lineGroup,
+			this.waypointGroup,
+			this.calloutGroup,
+			this.quizGroup,
+			this.prompt.group,
+			this.feedback.group,
+			this.continueBtn,
+			this.calloutPanel.group,
+			this.calloutLine,
+			this.badge,
+			this.hoverLine,
+		].filter(Boolean);
+	}
+
+	/** Stash current visibility and blank the lesson for the duration of a clip. */
+	hideForVideo() {
+		if (this._maskBackup) return;
+		this._maskBackup = this.videoMaskTargets().map((o) => [o, o.visible]);
+		for (const [o] of this._maskBackup) o.visible = false;
+	}
+
+	/** Put back exactly what was showing before, not a guess at what should be. */
+	restoreAfterVideo() {
+		for (const [o, v] of this._maskBackup || []) o.visible = v;
+		this._maskBackup = null;
+	}
+
+	/** Open a clip and blank the lesson behind it. */
+	openVideo(id, at) {
+		if (!this.video.open(id, at)) return false;
+		this.hideForVideo();
+		this.fire('video-open', id);
+		return true;
+	}
+
+	/** Close a clip and restore the lesson, without showing any follow-up card. */
+	dismissVideo() {
+		if (!this.video.close()) return false;
+		this.restoreAfterVideo();
+		this.videoFromCallout = null;
+		this.videoHover = null;
+		return true;
+	}
+
+	/** Hover tint for the two video plates. */
+	setVideoBtn(btn, on) {
+		btn.userData.plate.material.color.setHex(on ? 0x4d8fd6 : 0x2f6fb3);
+	}
+
+	/** Close the clip and hand the student the written version of the same point. */
+	closeVideo() {
+		const i = this.videoFromCallout;
+		if (!this.dismissVideo()) return false;
+		if (i != null) this.openCallout(i);
+		this.fire('video-close');
+		return true;
+	}
+
+	/**
+	 * Trigger while a clip is up. Close and Mute are the only live targets; a press anywhere
+	 * else on the panel is swallowed so the student cannot pick apart the anatomy they cannot
+	 * currently see.
+	 */
+	pressVideo() {
+		if (!this.video.isOpen) return false;
+		if (this.videoHover === 'close') return this.closeVideo();
+		if (this.videoHover === 'mute') return this.video.toggleMute();
 		return true;
 	}
 
@@ -632,6 +735,8 @@ export class Lesson {
 			const first = this.flowParts()[0];
 			if (first) this.revealPathTo(first);
 		}
+		// A clip must never survive a step change: it would hide the next step entirely.
+		this.dismissVideo();
 		if (!a.quiz && (this.quiz || this.quizGroup.visible)) {
 			// Leaving the quiz by any route (prev(), reset()) must take its plates with it.
 			this.quiz = null;
@@ -779,7 +884,9 @@ export class Lesson {
 				b + fh - this.ui.feedText * 0.75,
 				this.ui.panelZ,
 			);
-			this.badge.visible = fh > 0 && !!this.badgeKind;
+			// relayout() can fire from a troika sync callback at any time, including while a clip
+			// is up, so it must respect the video mask or the badge pops back through the panel.
+			this.badge.visible = !this._maskBackup && fh > 0 && !!this.badgeKind;
 		}
 		this.panelBottomY = b;
 	}
@@ -847,6 +954,7 @@ export class Lesson {
 		this.hoverSay('');
 		this.clearSay();
 		this.closeCallout();
+		this.dismissVideo();
 		this.model.clearLook();
 		this.model.scatter();
 		this.model.setFactor(0);
@@ -1049,6 +1157,7 @@ export class Lesson {
 		// tilt made it read edge-on at the edge of the Quest field of view.
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
 
+		this.video.update(dt);
 		if (this.callouts.length) this.placeCallouts();
 		if (this.calloutHover != null) this.callouts[this.calloutHover].hover.quaternion.copy(camQ);
 
@@ -1058,6 +1167,22 @@ export class Lesson {
 			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 			this.ray.set(o, d);
+			// The clip owns the whole pick chain while it is up: everything else is behind an
+			// opaque panel, and hovering a part the student cannot see is meaningless.
+			if (this.video.isOpen) {
+				const close = this.video.pickClose(this.ray);
+				const mute = close ? null : this.video.pickMute(this.ray);
+				const panel = close || mute ? null : this.video.pickPanel(this.ray);
+				this.videoHover = close ? 'close' : mute ? 'mute' : null;
+				this.setVideoBtn(this.video.closeBtn, this.videoHover === 'close');
+				this.setVideoBtn(this.video.muteBtn, this.videoHover === 'mute');
+				this.hoverCallout(-1);
+				this.hoverQuiz(null);
+				this.hoverPart(null);
+				this.updatePointers(controllers, ct, (close || mute || panel)?.distance ?? null);
+				return;
+			}
+			this.videoHover = null;
 			// Priority: Continue plate, then callout dots, then parts. A dot sits on the surface
 			// of its part, so without this order the part would always shadow it.
 			const btn = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
@@ -1180,6 +1305,7 @@ export class Lesson {
 			find: { asked: this.find.asked, left: this.find.queue.length },
 			hover: this.hover,
 			badge: this.badgeKind ?? null,
+			video: this.video ? { ...this.video.state(), hover: this.videoHover ?? null } : null,
 			quiz: this.quiz ? { q: this.quiz.i + 1, of: this.quiz.total, score: this.quiz.score, answered: this.quiz.answered } : null,
 			callout: { hover: this.callouts[this.calloutHover]?.spec.id ?? null, open: this.callouts[this.calloutOpen]?.spec.id ?? null, shown: this.callouts.filter((c) => c.marker.visible).length },
 			ready: !!this.continueOn,

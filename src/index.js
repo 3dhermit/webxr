@@ -135,6 +135,8 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			else if (e.key === 'ArrowLeft') lesson.prev();
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
 			else if (e.key === 'r') lesson.reset();
+			else if (e.key === 'v')
+				lesson.video.isOpen ? lesson.closeVideo() : lesson.openVideo(Object.keys(lesson.data.videos || {})[0]);
 			else if (e.key === '[') lesson.calibrateEye(1.28); // simulate a grade-6 student
 			else if (e.key === ']') lesson.calibrateEye(1.45); // back to the authored adult height
 			else if (e.key === 'c') lesson.calloutOpen != null ? lesson.closeCallout() : lesson.openCallout(lesson.callouts.findIndex((c) => c.marker.visible));
@@ -161,7 +163,9 @@ function onFrame(delta, _time, globals) {
 
 	const ct = controllers.right || controllers.left;
 	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
-		if (lesson.done) lesson.reset();
+		if (lesson.pressVideo()) {
+			// consumed: a clip is up and owns the trigger (F2)
+		} else if (lesson.done) lesson.reset();
 		else if (lesson.pickButton(controllers)) lesson.next();
 		else if (lesson.pressQuiz()) {
 			// consumed: a quiz choice plate was under the ray (defect #1)

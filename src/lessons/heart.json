@@ -478,6 +478,16 @@
       "videoAt": 0
     }
   ],
+  "videos": {
+    "anatoge-capture": {
+      "src": "assets/videos/anatoge-capture.mp4",
+      "title": "Anatomage walkthrough",
+      "start": 0,
+      "aspect": 1.7778,
+      "loop": false,
+      "muted": false
+    }
+  },
   "runtime": {
     "note": "Tunable by a teacher without touching code. Explode gain was measured in a browser run: gain 0.55 gave 14/14 draw calls with a 0.96 m exploded extent; gain 1.0 pushed parts out of the camera frustum (draw calls fell 14 -> 11).",
     "explodeGain": 0.27,
@@ -502,7 +512,11 @@
       "buttonElevDeg": -22,
       "buttonWidthDeg": 13,
       "maxComfortAzDeg": 45,
-      "eyeHeightMetres": 1.45
+      "eyeHeightMetres": 1.45,
+      "videoDistanceMetres": 1.35,
+      "videoFovDeg": 52,
+      "videoFollowPerSec": 3.4,
+      "videoDeadZoneDeg": 6
     },
     "debugFlag": "?debug=1"
   },
