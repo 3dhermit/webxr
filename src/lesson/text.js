@@ -159,17 +159,139 @@ export function updateLeaderLine(line, fromWorld, toWorld) {
 }
 
 /** 3D button: a plate plus a caption. Returns an Object3D whose userData.onClick we wire up. */
-export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02 }) {
+/**
+ * Lift a caption off its plate.
+ *
+ * A plate and its text authored at the same z are coplanar, and coplanar surfaces have no
+ * stable depth ordering: the GPU picks per fragment, per frame, per eye. On a monitor it
+ * looks like the label is stacked into the plate; in a headset the two eyes can resolve it
+ * differently, which is far worse than the flicker. One millimetre is invisible at reading
+ * distance and removes the tie entirely.
+ */
+const CAPTION_LIFT = 0.001;
+
+/**
+ * Pick a caption size that actually fits its plate, on ONE line.
+ *
+ * The depth tie was only half the problem: a caption authored at a fixed size wraps when the
+ * label is longer than the plate is wide, and a wrapped two-line caption is taller than a
+ * plate sized for one - so the text spills past the edges and reads as stacked on top of the
+ * button. The bundled font is monospace, so the width of a label is exactly predictable:
+ * advance is ~0.6 em per character.
+ */
+export function fitFontSize(label, width, height) {
+	const chars = Math.max(1, (label || '').length);
+	// 0.63 em per glyph, measured from this font rather than assumed: a 0.6 estimate put the
+	// predicted width exactly on maxWidth, so troika wrapped anyway and the two-line caption
+	// was taller than its plate. The 0.84 budget leaves slack so a rounding error cannot wrap.
+	return Math.min(height * 0.5, (width * 0.84) / (0.63 * chars));
+}
+
+/** Change a button's label and resize it to keep fitting. */
+export function setButtonLabel(btn, label) {
+	const cap = btn.userData.caption;
+	cap.text = label;
+	if (btn.userData.autoFit) cap.fontSize = fitFontSize(label, btn.userData.width, btn.userData.height);
+	cap.sync();
+}
+
+export function makeButton({ label, width = 0.2, height = 0.055, fontSize }) {
 	const g = new THREE.Group();
 	const plate = new THREE.Mesh(
 		new THREE.PlaneGeometry(width, height),
 		new THREE.MeshStandardMaterial({ color: 0x2f6fb3, roughness: 0.6 }),
 	);
-	const caption = makeText({ fontSize, maxWidth: width, anchorX: 'center', anchorY: 'middle', align: 'center' });
+	const autoFit = fontSize === undefined;
+	const size = autoFit ? fitFontSize(label, width, height) : fontSize;
+	const caption = makeText({ fontSize: size, maxWidth: width * 0.95, anchorX: 'center', anchorY: 'middle', align: 'center' });
 	caption.text = label;
 	caption.sync();
+	caption.position.z = CAPTION_LIFT;
 	g.add(plate, caption);
 	g.userData.plate = plate;
 	g.userData.caption = caption;
+	g.userData.autoFit = autoFit;
+	g.userData.width = width;
+	g.userData.height = height;
+	return g;
+}
+
+/**
+ * Painted button skin as a canvas texture: rounded plate, vertical gradient, bright edge.
+ *
+ * Drawn rather than shipped as a PNG so the lesson has working art with no asset to fetch,
+ * and so a skin can be retinted from data. A real image can replace it at any time via
+ * `image` on makeSkinnedButton without touching this code.
+ */
+export function skinTexture({ fill = '#2f6fb3', edge = '#8ec5ff', w = 320, h = 112, radius = 22 }) {
+	const c = document.createElement('canvas');
+	c.width = w;
+	c.height = h;
+	const x = c.getContext('2d');
+	// Hand-rolled rounded rect: ctx.roundRect is recent, and this has to render on whatever
+	// Chromium build the headset is shipping.
+	const r = radius;
+	const pad = 4;
+	x.beginPath();
+	x.moveTo(pad + r, pad);
+	x.lineTo(w - pad - r, pad);
+	x.quadraticCurveTo(w - pad, pad, w - pad, pad + r);
+	x.lineTo(w - pad, h - pad - r);
+	x.quadraticCurveTo(w - pad, h - pad, w - pad - r, h - pad);
+	x.lineTo(pad + r, h - pad);
+	x.quadraticCurveTo(pad, h - pad, pad, h - pad - r);
+	x.lineTo(pad, pad + r);
+	x.quadraticCurveTo(pad, pad, pad + r, pad);
+	x.closePath();
+	const grad = x.createLinearGradient(0, 0, 0, h);
+	grad.addColorStop(0, fill);
+	grad.addColorStop(1, '#0d1b2a');
+	x.fillStyle = grad;
+	x.fill();
+	x.strokeStyle = edge;
+	x.lineWidth = 3;
+	x.stroke();
+	const t = new THREE.CanvasTexture(c);
+	t.colorSpace = THREE.SRGBColorSpace;
+	t.anisotropy = 4;
+	return t;
+}
+
+/**
+ * An image-skinned button. `image` is a BACKGROUND skin and must not contain the label:
+ * the caption is always drawn as live text so it stays crisp and can be changed at runtime
+ * (the Full Reset button rewrites its own label to ask for confirmation).
+ */
+export function makeSkinnedButton({ label, width = 0.2, height = 0.055, fontSize, image, fill, edge }) {
+	const g = new THREE.Group();
+	const mat = new THREE.MeshBasicMaterial({ map: skinTexture({ fill, edge }), transparent: true });
+	const plate = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+	if (image) {
+		// Swap in the authored art when it arrives; the painted skin is what shows until then,
+		// so a missing or slow file never leaves an invisible button.
+		new THREE.TextureLoader().load(
+			image,
+			(tex) => {
+				tex.colorSpace = THREE.SRGBColorSpace;
+				mat.map = tex;
+				mat.needsUpdate = true;
+			},
+			undefined,
+			() => {},
+		);
+	}
+	const autoFit = fontSize === undefined;
+	const size = autoFit ? fitFontSize(label, width, height) : fontSize;
+	const caption = makeText({ fontSize: size, maxWidth: width * 0.95, anchorX: 'center', anchorY: 'middle', align: 'center' });
+	caption.text = label;
+	caption.sync();
+	caption.position.z = CAPTION_LIFT;
+	g.add(plate, caption);
+	g.userData.plate = plate;
+	g.userData.caption = caption;
+	g.userData.material = mat;
+	g.userData.autoFit = autoFit;
+	g.userData.width = width;
+	g.userData.height = height;
 	return g;
 }

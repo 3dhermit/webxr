@@ -17,7 +17,7 @@
  */
 import * as THREE from 'three';
 
-import { makeButton, makeText } from './text.js';
+import { makeButton, makeText, setButtonLabel } from './text.js';
 
 export class VideoScreen {
 	constructor({ camera, parent, videos = {}, runtime = {} }) {
@@ -54,10 +54,10 @@ export class VideoScreen {
 		);
 		this.group.add(this.backdrop, this.screen);
 
-		this.closeBtn = makeButton({ label: 'Close  (trigger)', width: 0.3, height: 0.075, fontSize: 0.028 });
+		this.closeBtn = makeButton({ label: 'Close  (trigger)', width: 0.3, height: 0.075 });
 		// A room of 28 headsets playing the same narration out loud is unusable, so sound is
 		// always one press away from off, and the label always states the CURRENT state.
-		this.muteBtn = makeButton({ label: 'Mute', width: 0.19, height: 0.075, fontSize: 0.028 });
+		this.muteBtn = makeButton({ label: 'Mute', width: 0.19, height: 0.075 });
 		this.group.add(this.closeBtn, this.muteBtn);
 		// Set when the browser refused unmuted playback and we fell back to muted: the student
 		// is told sound is off and one more press turns it on (that press is a fresh gesture).
@@ -78,7 +78,25 @@ export class VideoScreen {
 		);
 		this.bar.geometry.translate(0.5, 0, 0);
 		this.barBack.geometry.translate(0.5, 0, 0);
-		this.group.add(this.barBack, this.bar);
+		// Draggable handle, plus an invisible track that is far taller than the 12 mm bar: a
+		// hand ray cannot reliably hold a 12 mm line at arm's length, and a scrubber you fall
+		// off mid-drag is worse than none.
+		this.knob = new THREE.Mesh(
+			new THREE.CircleGeometry(0.016, 20),
+			new THREE.MeshBasicMaterial({ color: 0xffffff }),
+		);
+		this.track = new THREE.Mesh(
+			new THREE.PlaneGeometry(1, 1),
+			new THREE.MeshBasicMaterial({ visible: false }),
+		);
+		this.timeText = makeText({ fontSize: 0.026, maxWidth: 0.5, anchorX: 'left', anchorY: 'middle', color: 0xcfe3f5 });
+		this.group.add(this.barBack, this.bar, this.knob, this.track, this.timeText);
+
+		this.scrubbing = false;
+		this.wasPlaying = false;
+		this._plane = new THREE.Plane();
+		this._hit = new THREE.Vector3();
+		this._n = new THREE.Vector3();
 
 		// A student who takes the headset off without closing the clip must not leave narration
 		// playing to an empty room; the browser backgrounds the page in that case.
@@ -189,8 +207,7 @@ export class VideoScreen {
 	/** Keep the button label honest about what the next press will do. */
 	syncAudioUi() {
 		const label = this.audioBlocked ? 'Sound on' : this.el?.muted ? 'Unmute' : 'Mute';
-		this.muteBtn.userData.caption.text = label;
-		this.muteBtn.userData.caption.sync();
+		setButtonLabel(this.muteBtn, label);
 	}
 
 	/** Toggle sound. Called from a trigger press, which is the gesture an unmute needs. */
@@ -213,6 +230,7 @@ export class VideoScreen {
 			this.resumeAt.set(this.id, this.el.currentTime || 0);
 			this.el.pause();
 		}
+		this.cancelScrub();
 		this.id = null;
 		this.el = null;
 		this.group.visible = false;
@@ -230,12 +248,20 @@ export class VideoScreen {
 		const w = h * aspect;
 		this.screen.scale.set(w, h, 1);
 		this.backdrop.scale.set(w * 1.08, h * 1.22, 1);
-		this.closeBtn.position.set(w / 2 - 0.17, -h / 2 - 0.055, 0.001);
-		this.muteBtn.position.set(w / 2 - 0.17 - 0.26, -h / 2 - 0.055, 0.001);
+		// Buttons sit clear BELOW the scrub track. The track is a tall invisible plane so a hand
+		// ray can hold it; overlapping the buttons would make aiming near them ambiguous even
+		// though pick order resolves it in their favour.
+		this.closeBtn.position.set(w / 2 - 0.17, -h / 2 - 0.088, 0.001);
+		this.muteBtn.position.set(w / 2 - 0.17 - 0.26, -h / 2 - 0.088, 0.001);
 		this.caption.position.set(0, h / 2 + 0.02, 0.001);
-		this.barBack.position.set(-w / 2, -h / 2 - 0.016, 0.001);
-		this.bar.position.set(-w / 2, -h / 2 - 0.016, 0.002);
+		const barY = -h / 2 - 0.016;
+		this.barBack.position.set(-w / 2, barY, 0.001);
+		this.bar.position.set(-w / 2, barY, 0.002);
 		this.barBack.scale.x = w;
+		this.knob.position.set(-w / 2, barY, 0.004);
+		this.track.position.set(0, barY, 0.003);
+		this.track.scale.set(w, 0.055, 1);
+		this.timeText.position.set(-w / 2, barY - 0.038, 0.001);
 		this.screenW = w;
 		this.screenH = h;
 	}
@@ -273,7 +299,79 @@ export class VideoScreen {
 		}
 		this.reposition(dt);
 		const d = this.el?.duration;
-		this.bar.scale.x = Number.isFinite(d) && d > 0 ? (this.el.currentTime / d) * this.screenW : 0;
+		const u = Number.isFinite(d) && d > 0 ? this.el.currentTime / d : 0;
+		this.bar.scale.x = u * this.screenW;
+		this.knob.position.x = -this.screenW / 2 + u * this.screenW;
+		const mmss = (t) => {
+			const sec = Math.max(0, Math.floor(t || 0));
+			return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+		};
+		this.timeText.text = Number.isFinite(d) ? `${mmss(this.el.currentTime)} / ${mmss(d)}` : '';
+		this.timeText.sync();
+	}
+
+	/** 0..1 along the scrub track for a ray, from the track's PLANE so a fast drag cannot
+	 * fall off the end of a 12 mm bar and silently stop seeking. Null if the ray misses. */
+	scrubUFromRay(ray) {
+		if (!this.isOpen) return null;
+		this.track.updateMatrixWorld();
+		const n = this._n.set(0, 0, 1).applyQuaternion(this.group.quaternion).normalize();
+		this._plane.setFromNormalAndCoplanarPoint(n, this.track.getWorldPosition(new THREE.Vector3()));
+		if (!ray.ray.intersectPlane(this._plane, this._hit)) return null;
+		const local = this.track.worldToLocal(this._hit.clone());
+		return THREE.MathUtils.clamp(local.x + 0.5, 0, 1);
+	}
+
+	/** Is the ray on the scrub track (bounded)? */
+	pickScrub(ray) {
+		if (!this.isOpen) return null;
+		const hit = ray.intersectObject(this.track, false)[0];
+		if (!hit) return null;
+		const local = this.track.worldToLocal(hit.point.clone());
+		return { distance: hit.distance, u: THREE.MathUtils.clamp(local.x + 0.5, 0, 1) };
+	}
+
+	seekToFraction(u) {
+		const d = this.el?.duration;
+		if (!Number.isFinite(d) || d <= 0) return false;
+		this.el.currentTime = THREE.MathUtils.clamp(u, 0, 1) * d;
+		return true;
+	}
+
+	/**
+	 * Start dragging the handle. Playback is paused for the duration: a playing element keeps
+	 * advancing currentTime between seeks, so the handle fights the drag and the picture
+	 * stutters between the scrubbed frame and the played one.
+	 */
+	beginScrub(u) {
+		if (!this.isOpen || this.scrubbing) return false;
+		this.scrubbing = true;
+		this.wasPlaying = !this.el.paused;
+		this.el.pause();
+		this.seekToFraction(u);
+		this.knob.material.color.setHex(0x9fc2e0);
+		return true;
+	}
+
+	scrubTo(u) {
+		if (!this.scrubbing) return false;
+		return this.seekToFraction(u);
+	}
+
+	/** Abandon a drag without resuming: used when the clip is closing underneath it. */
+	cancelScrub() {
+		this.scrubbing = false;
+		this.wasPlaying = false;
+		this.knob.material.color.setHex(0xffffff);
+	}
+
+	/** Release the handle and resume only if it was playing when the drag started. */
+	endScrub() {
+		if (!this.scrubbing) return false;
+		this.scrubbing = false;
+		this.knob.material.color.setHex(0xffffff);
+		if (this.wasPlaying) this.el.play().catch(() => {});
+		return true;
 	}
 
 	/** Is the ray on the Close plate? */
@@ -302,6 +400,7 @@ export class VideoScreen {
 			open: this.id,
 			t: this.el ? +(this.el.currentTime || 0).toFixed(2) : null,
 			paused: this.el ? this.el.paused : null,
+			scrubbing: this.scrubbing,
 			muted: this.el ? this.el.muted : null,
 			audioBlocked: this.audioBlocked,
 			resume: Object.fromEntries([...this.resumeAt].map(([k, v]) => [k, +v.toFixed(2)])),

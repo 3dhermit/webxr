@@ -144,6 +144,8 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
 			else if (e.key === 'r') lesson.reset();
 			else if (e.key === 'x') lesson.model.returnMoved();
+			else if (e.key === 'b') { lesson.hoverNav('back'); lesson.pressNav(); }
+			else if (e.key === 'R') { lesson.hoverNav('reset'); lesson.pressNav(); }
 			else if (e.key === 'v')
 				lesson.video.isOpen ? lesson.closeVideo() : lesson.openVideo(Object.keys(lesson.data.videos || {})[0]);
 			else if (e.key === '[') lesson.calibrateEye(1.28); // simulate a grade-6 student
@@ -187,6 +189,9 @@ function onFrame(delta, _time, globals) {
 			// consumed: a clip is up and owns the trigger (F2)
 		} else if (lesson.done) lesson.reset();
 		else if (lesson.pickButton(controllers)) lesson.next();
+		else if (lesson.pressNav()) {
+			// consumed: Back or Full Reset was under the ray (F5)
+		}
 		else if (lesson.pressQuiz()) {
 			// consumed: a quiz choice plate was under the ray (defect #1)
 		} else if (lesson.pressCallout()) {

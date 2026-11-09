@@ -4,8 +4,10 @@
  * Nothing is stored — the classroom rule is formative feedback only, no records, no accounts.
  */
 import * as THREE from 'three';
-import { Panel, makeButton, makeLabel, makeLeaderLine, makeText, updateLeaderLine } from './text.js';
+
+import { Panel, makeButton, makeLabel, makeLeaderLine, makeSkinnedButton, makeText, setButtonLabel, updateLeaderLine } from './text.js';
 import { VideoScreen } from './video.js';
+import { XR_BUTTONS } from 'gamepad-wrapper';
 
 const OK = 0x8fe3a0;
 const BAD = 0xff9a8a;
@@ -50,6 +52,12 @@ export class Lesson {
 			btnElev: u.buttonElevDeg ?? -22,
 			btnWidth: u.buttonWidthDeg ?? 13,
 			maxAz: u.maxComfortAzDeg ?? 45,
+			// F5: Back / Full Reset live opposite the Continue plate so 'go on' and 'go back'
+			// are never adjacent targets for a mis-aimed ray.
+			navAz: u.navAzDeg ?? -31,
+			navTopElev: u.navTopElevDeg ?? -15,
+			navGap: u.navGapDeg ?? 9,
+			navWidth: u.navWidthDeg ?? 11,
 		};
 		this.ui = { eyeY: u.eyeHeightMetres ?? 1.45 };
 		this.planUi();
@@ -207,6 +215,10 @@ export class Lesson {
 		this.ui.btnX = p * Math.tan(rad(g.btnAz));
 		this.ui.btnY = this.ui.eyeY + p * Math.tan(rad(g.btnElev));
 		this.ui.btnW = p * Math.tan(rad(g.btnWidth));
+		this.ui.navX = p * Math.tan(rad(g.navAz));
+		this.ui.navTopY = this.ui.eyeY + p * Math.tan(rad(g.navTopElev));
+		this.ui.navGap = p * Math.tan(rad(g.navGap));
+		this.ui.navW = p * Math.tan(rad(g.navWidth));
 	}
 
 	buildUI() {
@@ -222,7 +234,9 @@ export class Lesson {
 		this.feedback.onfit = () => this.relayout();
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
-		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
+		// Plate is deliberately taller than the old 0.26 ratio: the label is long, and auto-fit
+		// would otherwise shrink it to stay on one line inside a very shallow plate.
+		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.34 });
 		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn);
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
@@ -247,14 +261,18 @@ export class Lesson {
 			new THREE.MeshBasicMaterial({ color: OK }),
 		);
 		const badMark = new THREE.Group();
-		for (const rot of [Math.PI / 4, -Math.PI / 4]) {
+		// The two bars cross, so they overlap in the middle. Authored at the same z they are
+		// coplanar there and fight exactly like a caption on its plate; a fraction of a
+		// millimetre apart settles the order.
+		[Math.PI / 4, -Math.PI / 4].forEach((rot, k) => {
 			const bar = new THREE.Mesh(
 				new THREE.PlaneGeometry(br * 2.2, br * 0.5),
 				new THREE.MeshBasicMaterial({ color: BAD }),
 			);
 			bar.rotation.z = rot;
+			bar.position.z = k * 0.0004;
 			badMark.add(bar);
-		}
+		});
 		okMark.visible = false;
 		badMark.visible = false;
 		this.badge = new THREE.Group();
@@ -266,6 +284,33 @@ export class Lesson {
 		// Defect #1: heart.json authors four cited quiz questions and NOTHING read them -
 		// `npm run validate` even counted them ("quiz 4"), so the gate reported healthy content
 		// that reached no student. They are now a real step with four pickable choice plates.
+		// F5: image-skinned Back and Full Reset. The skin is painted to a canvas so the buttons
+		// work with no art shipped; runtime.ui.backImage / resetImage replace it when art exists.
+		const ui = (this.data.runtime || {}).ui || {};
+		const navH = this.ui.navW * 0.3;
+		this.backBtn = makeSkinnedButton({
+			label: 'Back',
+			width: this.ui.navW,
+			height: navH,
+			image: ui.backImage,
+			fill: '#2f6fb3',
+			edge: '#8ec5ff',
+		});
+		this.resetBtn = makeSkinnedButton({
+			label: 'Full Reset',
+			width: this.ui.navW,
+			height: navH,
+			image: ui.resetImage,
+			// Warm skin so it never reads as just another blue 'go' button, backed up by the
+			// two-press confirm below - colour alone must not be what protects a student's work.
+			fill: '#9a5a1e',
+			edge: '#ffc489',
+		});
+		this.navBtns = { back: this.backBtn, reset: this.resetBtn };
+		this.root.add(this.backBtn, this.resetBtn);
+		this.navHover = null;
+		this.resetArmed = 0;
+
 		this.quizGroup = new THREE.Group();
 		this.quizPlates = [];
 		const qw = this.ui.panelW * 0.98;
@@ -280,7 +325,7 @@ export class Lesson {
 		this.root.add(this.quizGroup);
 		this.quiz = null;
 
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge];
+		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge, this.backBtn, this.resetBtn];
 		this.applyUiLayout();
 		for (const head of this.uiParts) head.lookAt(0, this.ui.eyeY, 0);
 	}
@@ -300,6 +345,8 @@ export class Lesson {
 			this.calloutLine,
 			this.badge,
 			this.quizGroup,
+			this.backBtn,
+			this.resetBtn,
 			this.hoverLine,
 		].filter(Boolean);
 		for (const o of old) {
@@ -329,6 +376,10 @@ export class Lesson {
 		if (this.hoverLine) this.hoverLine.position.set(panelX, panelBottom - 0.022, panelZ);
 		this.placeCalloutPanel();
 		if (this.quizPlates?.length) this.placeQuiz();
+		if (this.backBtn) {
+			this.backBtn.position.set(this.ui.navX, this.ui.navTopY, this.ui.panelZ);
+			this.resetBtn.position.set(this.ui.navX, this.ui.navTopY - this.ui.navGap, this.ui.panelZ);
+		}
 		this.relayout();
 	}
 
@@ -493,6 +544,8 @@ export class Lesson {
 			this.calloutPanel.group,
 			this.calloutLine,
 			this.badge,
+			this.backBtn,
+			this.resetBtn,
 			this.hoverLine,
 		].filter(Boolean);
 	}
@@ -579,6 +632,62 @@ export class Lesson {
 	/** Hover tint for the two video plates. */
 	setVideoBtn(btn, on) {
 		btn.userData.plate.material.color.setHex(on ? 0x4d8fd6 : 0x2f6fb3);
+	}
+
+	/** Hover feedback for the skinned nav buttons: the skin is a texture, so tint the map. */
+	hoverNav(kind) {
+		if (this.navHover === kind) return;
+		this.navHover = kind;
+		for (const [k, btn] of Object.entries(this.navBtns)) {
+			btn.userData.material.color.setHex(k === kind ? 0xffffff : 0xc8d4de);
+			btn.scale.setScalar(k === kind ? 1.04 : 1);
+		}
+	}
+
+	/** Nearest nav plate under the ray, or null. */
+	pickNav(ray) {
+		let best = null;
+		for (const [kind, btn] of Object.entries(this.navBtns)) {
+			if (!btn.visible) continue;
+			const hit = ray.intersectObject(btn.userData.plate, false)[0];
+			if (hit && (!best || hit.distance < best.distance)) best = { kind, distance: hit.distance };
+		}
+		return best;
+	}
+
+	syncResetLabel() {
+		setButtonLabel(this.resetBtn, this.resetArmed > 0 ? 'Press again' : 'Full Reset');
+	}
+
+	/**
+	 * Trigger on a nav button. Full Reset asks twice.
+	 *
+	 * One press wipes a student's whole lesson, and the button must sit within easy reach of a
+	 * hand ray - which is exactly the condition for a mis-aimed press. The second press is the
+	 * confirmation, and the arm lapses so a student who walks away cannot leave it primed for
+	 * whoever picks the headset up next.
+	 */
+	pressNav() {
+		if (!this.navHover) return false;
+		if (this.navHover === 'back') {
+			this.resetArmed = 0;
+			this.syncResetLabel();
+			if (this.i > 0) this.prev();
+			else this.say('This is the first step.', MUTED);
+			this.fire('back');
+			return true;
+		}
+		if (this.resetArmed > 0) {
+			this.resetArmed = 0;
+			this.reset();
+			this.syncResetLabel();
+			this.fire('full-reset');
+			return true;
+		}
+		this.resetArmed = 4;
+		this.syncResetLabel();
+		this.say('Press Full Reset again to clear everything for the next student.', MUTED);
+		return true;
 	}
 
 	/** Close the clip and hand the student the written version of the same point. */
@@ -1252,6 +1361,14 @@ export class Lesson {
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
 
 		this.video.update(dt);
+		// Let a primed Full Reset lapse on its own.
+		if (this.resetArmed > 0) {
+			this.resetArmed -= dt;
+			if (this.resetArmed <= 0) {
+				this.resetArmed = 0;
+				this.syncResetLabel();
+			}
+		}
 		this.updateGrab(controllers);
 		if (this.callouts.length) this.placeCallouts();
 		if (this.calloutHover != null) this.callouts[this.calloutHover].hover.quaternion.copy(camQ);
@@ -1267,14 +1384,29 @@ export class Lesson {
 			if (this.video.isOpen) {
 				const close = this.video.pickClose(this.ray);
 				const mute = close ? null : this.video.pickMute(this.ray);
-				const panel = close || mute ? null : this.video.pickPanel(this.ray);
-				this.videoHover = close ? 'close' : mute ? 'mute' : null;
+				const scrub = close || mute ? null : this.video.pickScrub(this.ray);
+				const panel = close || mute || scrub ? null : this.video.pickPanel(this.ray);
+				this.videoHover = close ? 'close' : mute ? 'mute' : scrub ? 'scrub' : null;
 				this.setVideoBtn(this.video.closeBtn, this.videoHover === 'close');
 				this.setVideoBtn(this.video.muteBtn, this.videoHover === 'mute');
+				// Scrubbing is a HOLD, not a click, so it is driven here rather than from the
+				// trigger handler. Once a drag starts the position comes from the track's PLANE,
+				// so sweeping past the end of the bar keeps seeking instead of dropping the drag.
+				const held = !!ct?.gamepad?.getButton?.(XR_BUTTONS.TRIGGER);
+				if (this.video.scrubbing) {
+					if (held) {
+						const u = this.video.scrubUFromRay(this.ray);
+						if (u != null) this.video.scrubTo(u);
+					} else {
+						this.video.endScrub();
+					}
+				} else if (held && scrub) {
+					this.video.beginScrub(scrub.u);
+				}
 				this.hoverCallout(-1);
 				this.hoverQuiz(null);
 				this.hoverPart(null);
-				this.updatePointers(controllers, ct, (close || mute || panel)?.distance ?? null);
+				this.updatePointers(controllers, ct, (close || mute || scrub || panel)?.distance ?? null);
 				return;
 			}
 			this.videoHover = null;
@@ -1286,8 +1418,12 @@ export class Lesson {
 			}
 			// Priority: Continue plate, then callout dots, then parts. A dot sits on the surface
 			// of its part, so without this order the part would always shadow it.
-			const btn = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
-			const qz = btn ? null : this.pickQuiz(this.ray);
+			const btn = this.continueBtn.visible
+				? this.ray.intersectObject(this.continueBtn.userData.plate, false)[0]
+				: null;
+			const nav = btn ? null : this.pickNav(this.ray);
+			this.hoverNav(nav?.kind ?? null);
+			const qz = btn || nav ? null : this.pickQuiz(this.ray);
 			const dot = btn || qz ? null : this.pickCallout(this.ray);
 			if (qz) this.hoverQuiz(qz.plate.userData.choice);
 			else this.hoverQuiz(null);
@@ -1295,6 +1431,10 @@ export class Lesson {
 				this.hoverCallout(-1);
 				this.hoverPart(null);
 				hitDist = btn.distance;
+			} else if (nav) {
+				this.hoverCallout(-1);
+				this.hoverPart(null);
+				hitDist = nav.distance;
 			} else if (qz) {
 				this.hoverCallout(-1);
 				this.hoverPart(null);
@@ -1407,6 +1547,7 @@ export class Lesson {
 			hover: this.hover,
 			badge: this.badgeKind ?? null,
 			grab: this.grab ? { id: this.grab.id, hand: this.grab.hand } : null,
+			nav: { hover: this.navHover ?? null, resetArmed: +Math.max(0, this.resetArmed).toFixed(1) },
 			moved: this.model.movedIds().length,
 			video: this.video ? { ...this.video.state(), hover: this.videoHover ?? null } : null,
 			quiz: this.quiz ? { q: this.quiz.i + 1, of: this.quiz.total, score: this.quiz.score, answered: this.quiz.answered } : null,
