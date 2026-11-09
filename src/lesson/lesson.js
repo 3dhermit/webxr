@@ -110,6 +110,8 @@ export class Lesson {
 			runtime: (data.runtime || {}).ui || {},
 		});
 		this.videoFromCallout = null;
+		// F4: squeeze-to-grab. Trigger stays 'select/advance'; squeeze is 'move this aside'.
+		this.grab = null;
 
 		this.buildUI();
 	}
@@ -525,6 +527,55 @@ export class Lesson {
 		return true;
 	}
 
+	/**
+	 * Squeeze pressed: take hold of whatever the pointer is on.
+	 *
+	 * Deliberately refused during a clip or the quiz. Both cover the anatomy, so a grab there
+	 * would silently rearrange a model the student cannot see and cannot put back.
+	 */
+	grabStart(hand, controllers) {
+		if (this.grab) return false;
+		if (this.video.isOpen || this.quiz) return false;
+		const id = this.hover;
+		if (!id) return false;
+		const ct = controllers?.[hand];
+		if (!ct?.gripSpace) return false;
+		const partWorld = this.model.beginGrab(id);
+		if (!partWorld) return false;
+		const handWorld = ct.gripSpace.getWorldPosition(new THREE.Vector3());
+		// Offset from hand to part, so the part moves WITH the hand from where it already was.
+		this.grab = { id, hand, offset: partWorld.sub(handWorld) };
+		this.model.highlight(id, true);
+		this.fire('grab-start', id);
+		return true;
+	}
+
+	/** Squeeze released. Ignores the other hand's release so two-handed use cannot drop early. */
+	grabEnd(hand) {
+		if (!this.grab) return false;
+		if (hand && this.grab.hand !== hand) return false;
+		const id = this.grab.id;
+		this.model.endGrab(id);
+		this.model.highlight(id, false);
+		this.grab = null;
+		this.fire('grab-end', id);
+		return true;
+	}
+
+	/** Per-frame: drive the held part from the grip pose. */
+	updateGrab(controllers) {
+		if (!this.grab) return;
+		const ct = controllers?.[this.grab.hand];
+		// A controller that sleeps or loses tracking mid-grab must not leave a part welded to a
+		// stale pose; drop it where it is.
+		if (!ct?.gripSpace?.visible) {
+			this.grabEnd();
+			return;
+		}
+		const handWorld = ct.gripSpace.getWorldPosition(this.t);
+		this.model.setGrabWorld(this.grab.id, handWorld.clone().add(this.grab.offset));
+	}
+
 	/** Hover tint for the two video plates. */
 	setVideoBtn(btn, on) {
 		btn.userData.plate.material.color.setHex(on ? 0x4d8fd6 : 0x2f6fb3);
@@ -774,6 +825,10 @@ export class Lesson {
 		}
 		// A clip must never survive a step change: it would hide the next step entirely.
 		this.dismissVideo();
+		// Each step authors its own arrangement (isolate/ghost/explode), so hand-displaced parts
+		// go home on a step change or the next step sets up over a model the student rearranged.
+		this.grabEnd();
+		this.model.returnMoved();
 		if (!a.quiz && (this.quiz || this.quizGroup.visible)) {
 			// Leaving the quiz by any route (prev(), reset()) must take its plates with it.
 			this.quiz = null;
@@ -992,6 +1047,8 @@ export class Lesson {
 		this.clearSay();
 		this.closeCallout();
 		this.dismissVideo();
+		this.grabEnd();
+		this.model.returnMoved();
 		this.model.clearLook();
 		this.model.scatter();
 		this.model.setFactor(0);
@@ -1195,6 +1252,7 @@ export class Lesson {
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
 
 		this.video.update(dt);
+		this.updateGrab(controllers);
 		if (this.callouts.length) this.placeCallouts();
 		if (this.calloutHover != null) this.callouts[this.calloutHover].hover.quaternion.copy(camQ);
 
@@ -1220,6 +1278,12 @@ export class Lesson {
 				return;
 			}
 			this.videoHover = null;
+			// While holding, hover is pinned to the held part: the ray sweeps across everything
+			// as the arm moves, and re-picking would strobe the highlight and the name readout.
+			if (this.grab) {
+				this.updatePointers(controllers, ct, null);
+				return;
+			}
 			// Priority: Continue plate, then callout dots, then parts. A dot sits on the surface
 			// of its part, so without this order the part would always shadow it.
 			const btn = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
@@ -1342,6 +1406,8 @@ export class Lesson {
 			find: { asked: this.find.asked, left: this.find.queue.length },
 			hover: this.hover,
 			badge: this.badgeKind ?? null,
+			grab: this.grab ? { id: this.grab.id, hand: this.grab.hand } : null,
+			moved: this.model.movedIds().length,
 			video: this.video ? { ...this.video.state(), hover: this.videoHover ?? null } : null,
 			quiz: this.quiz ? { q: this.quiz.i + 1, of: this.quiz.total, score: this.quiz.score, answered: this.quiz.answered } : null,
 			callout: { hover: this.callouts[this.calloutHover]?.spec.id ?? null, open: this.callouts[this.calloutOpen]?.spec.id ?? null, shown: this.callouts.filter((c) => c.marker.visible).length },

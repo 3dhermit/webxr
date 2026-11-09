@@ -139,9 +139,70 @@ export class AnatomyModel {
 	/** One scalar drives every part; per-part `outAmount` lets the reassembly task snap parts in. */
 	apply() {
 		for (const p of this.parts.values()) {
-			const f = this.factor * p.outAmount;
-			p.mesh.position.copy(p.home).addScaledVector(p.localOut, p.spec.spread * f * this.explodeGain);
+			// F4: while the controller owns a part, it owns its position outright - otherwise an
+			// explode tween running during a grab would drag the part out of the student's hand.
+			if (p.held) continue;
+			this.basePos(p, p.mesh.position);
+			// A part the student moved aside keeps that displacement through later explodes, so
+			// "get it out of the way" stays true instead of being undone by the next step's tween.
+			if (p.moved) p.mesh.position.add(p.moved);
 		}
+	}
+
+	/** Where a part sits for the current explode factor, before any manual displacement. */
+	basePos(p, target) {
+		const f = this.factor * p.outAmount;
+		return target.copy(p.home).addScaledVector(p.localOut, p.spec.spread * f * this.explodeGain);
+	}
+
+	/**
+	 * Take hold of a part. Returns its current world position so the caller can record the
+	 * offset to the hand and move it from where it already is: snapping the part's origin onto
+	 * the controller would make every grab jump, which reads as grabbing the wrong thing.
+	 */
+	beginGrab(id) {
+		const p = this.parts.get(id);
+		if (!p) return null;
+		p.held = true;
+		return p.mesh.getWorldPosition(new THREE.Vector3());
+	}
+
+	/** Drive a held part's origin to a world point. */
+	setGrabWorld(id, worldPos) {
+		const p = this.parts.get(id);
+		if (!p || !p.held) return false;
+		// Convert through the mesh's OWN parent, not the model group: quantized glTF puts scale
+		// on ancestor nodes, so the group is not necessarily the direct parent.
+		const local = p.mesh.parent.worldToLocal(worldPos.clone());
+		p.mesh.position.copy(local);
+		p.moved = local.clone().sub(this.basePos(p, new THREE.Vector3()));
+		return true;
+	}
+
+	endGrab(id) {
+		const p = this.parts.get(id);
+		if (!p) return false;
+		p.held = false;
+		return true;
+	}
+
+	/** Ids the student has displaced by hand. */
+	movedIds() {
+		return [...this.parts].filter(([, p]) => p.moved).map(([id]) => id);
+	}
+
+	/** Send every displaced part back to where the lesson wants it. */
+	returnMoved() {
+		let n = 0;
+		for (const p of this.parts.values()) {
+			if (p.moved) {
+				p.moved = null;
+				n += 1;
+			}
+			p.held = false;
+		}
+		if (n) this.apply();
+		return n;
 	}
 
 	setFactor(f) {
