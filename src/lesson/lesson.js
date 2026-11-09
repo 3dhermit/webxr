@@ -60,6 +60,41 @@ export class Lesson {
 		this.find = { queue: [], asked: null, misses: 0 };
 		this.done = false;
 
+		// F1: interactive callouts. Each entry is a marker dot anchored to a part (it tracks
+		// the part through explode/scatter, re-anchored every frame like the waypoints); a
+		// trigger on the dot opens a floating text panel, a trigger again — or on any part —
+		// closes it. Dots win the hover test over the part they sit on, so the finer target
+		// is never shadowed. Unknown anchors are dropped silently so a bad JSON line can't
+		// take the whole lesson down.
+		this.callouts = [];
+		this.calloutDots = [];
+		this.calloutGroup = new THREE.Group();
+		this.calloutOpen = null;
+		this.calloutHover = null;
+		this.root.add(this.calloutGroup);
+		for (const c of data.callouts ?? []) {
+			if (!this.model.parts.get(c.anchor)) continue;
+			const marker = new THREE.Group();
+			const dot = new THREE.Mesh(
+				new THREE.SphereGeometry(0.0075, 16, 12),
+				new THREE.MeshBasicMaterial({ color: 0x37c8ff }),
+			);
+			dot.userData.calloutIndex = this.callouts.length;
+			const hover = makeLabel(this.data.runtime?.labelTextHeightMetres ?? 0.014, 0xffffff);
+			hover.position.y = 0.03;
+			hover.visible = false;
+			marker.add(dot, hover);
+			this.calloutGroup.add(marker);
+			this.callouts.push({
+				spec: c,
+				marker,
+				dot,
+				hover,
+				offset: new THREE.Vector3(...(c.offset ?? [0, 0.05, 0])),
+			});
+			this.calloutDots.push(dot);
+		}
+
 		this.buildUI();
 	}
 
@@ -137,6 +172,12 @@ export class Lesson {
 		const xIn = p * Math.tan(inner);
 		const xOut = p * Math.tan(outer);
 
+		// F1: the callout card takes the OTHER side of the anatomy band, measured the same way,
+		// so the prompt card and a callout can both be open without either covering the heart.
+		const cIn = side < 0 ? a.azMax + gap : a.azMin - gap;
+		const cOut = cIn - side * w;
+		this.ui.calloutX = (p * Math.tan(cIn) + p * Math.tan(cOut)) / 2;
+
 		this.ui.panelZ = -p;
 		this.ui.panelX = (xIn + xOut) / 2;
 		this.ui.panelW = Math.abs(xOut - xIn);
@@ -171,8 +212,118 @@ export class Lesson {
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn];
+		// F1: one reusable callout card plus a leader line back to the dot that opened it.
+		this.calloutPanel = new Panel({ width: panelW, fontSize: feedText });
+		this.calloutPanel.onfit = () => this.placeCalloutPanel();
+		this.calloutPanel.group.visible = false;
+		this.calloutLine = makeLeaderLine();
+		this.calloutLine.visible = false;
+		this.root.add(this.calloutPanel.group, this.calloutLine);
+
+		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group];
 		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
+	}
+
+	/** Callout card grows UP from the same bottom line as the prompt stack, on the far side. */
+	placeCalloutPanel() {
+		const h = this.calloutPanel.height || 0.04;
+		this.calloutPanel.group.position.set(this.ui.calloutX, this.ui.panelBottom + h, this.ui.panelZ);
+	}
+
+	/** Which callouts belong to the current step. Test steps hide them unless listed explicitly. */
+	calloutActive(c) {
+		if (this.done) return false;
+		const st = this.steps[this.i];
+		if (!st) return false;
+		if (Array.isArray(c.spec.steps)) return c.spec.steps.includes(st.id);
+		const a = st.action || {};
+		return !a.flow && !a.reassemble;
+	}
+
+	refreshCallouts() {
+		for (const c of this.callouts) c.marker.visible = this.calloutActive(c);
+		if (this.calloutOpen != null && !this.callouts[this.calloutOpen].marker.visible) this.closeCallout();
+		this.hoverCallout(-1);
+	}
+
+	/** Re-anchor every visible marker to its part; parts move during explode/scatter. */
+	placeCallouts() {
+		const s = this.model.group.scale.x;
+		for (const c of this.callouts) {
+			if (!c.marker.visible) continue;
+			c.marker.position.copy(this.model.center(c.spec.anchor)).addScaledVector(c.offset, s);
+		}
+	}
+
+	/** Nearest visible callout dot on the ray, or null. Returns { index, distance }. */
+	pickCallout(ray) {
+		const dots = this.calloutDots.filter((d) => d.parent.visible);
+		if (!dots.length) return null;
+		// Dots are 15 mm across — too small to hit reliably with a hand ray at arm's length, so
+		// test a generous proxy radius the same way the parts use hit spheres.
+		const proxy = this.data.runtime?.calloutHitMetres ?? 0.02;
+		let best = null;
+		const p = new THREE.Vector3();
+		for (const d of dots) {
+			d.getWorldPosition(p);
+			const t = p.clone().sub(ray.ray.origin).dot(ray.ray.direction);
+			if (t < 0) continue;
+			if (ray.ray.distanceSqToPoint(p) > proxy * proxy) continue;
+			if (!best || t < best.distance) best = { index: d.userData.calloutIndex, distance: t };
+		}
+		return best;
+	}
+
+	hoverCallout(i) {
+		// Normalise before the equality check: update() passes -1 for "nothing", and comparing
+		// -1 against a stored null never matches, so this ran its full body every idle frame.
+		const next = i >= 0 ? i : null;
+		if (this.calloutHover === next) return;
+		const prev = this.callouts[this.calloutHover];
+		if (prev) {
+			prev.dot.material.color.setHex(0x37c8ff);
+			prev.dot.scale.setScalar(1);
+			prev.hover.visible = false;
+		}
+		this.calloutHover = next;
+		const c = this.callouts[next];
+		if (c) {
+			c.dot.material.color.setHex(0xffffff);
+			c.dot.scale.setScalar(1.4);
+			c.hover.userData.text.text = this.textOf(c.spec.title);
+			c.hover.userData.text.sync();
+			c.hover.visible = true;
+		}
+	}
+
+	openCallout(i) {
+		const c = this.callouts[i];
+		if (!c) return;
+		this.calloutOpen = i;
+		const title = this.textOf(c.spec.title);
+		const body = this.textOf(c.spec.text);
+		this.calloutPanel.set(title ? `${title}\n\n${body}` : body, 0xffffff);
+		this.calloutPanel.group.visible = true;
+		this.calloutLine.visible = true;
+		this.placeCalloutPanel();
+		this.fire('callout-open', c.spec.id);
+	}
+
+	closeCallout() {
+		if (this.calloutOpen == null) return;
+		const id = this.callouts[this.calloutOpen]?.spec.id;
+		this.calloutOpen = null;
+		this.calloutPanel.group.visible = false;
+		this.calloutLine.visible = false;
+		this.fire('callout-close', id);
+	}
+
+	/** Trigger handler for callouts. Returns true when the press was consumed. */
+	pressCallout() {
+		if (this.calloutHover == null) return false;
+		if (this.calloutOpen === this.calloutHover) this.closeCallout();
+		else this.openCallout(this.calloutHover);
+		return true;
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -286,6 +437,7 @@ export class Lesson {
 		this.say(this.misconceptionFor(st.id));
 		this.setContinueEnabled(!a.flow && !a.reassemble);
 		this.relayout();
+		this.refreshCallouts();
 		this.fire('step', st.id);
 		return st;
 	}
@@ -422,6 +574,7 @@ export class Lesson {
 
 	finish() {
 		this.done = true;
+		this.refreshCallouts();
 		this.labelGroup.visible = false;
 		this.waypointGroup.visible = false;
 		this.model.clearLook();
@@ -446,6 +599,7 @@ export class Lesson {
 		this.hover = null;
 		this.hoverSay('');
 		this.clearSay();
+		this.closeCallout();
 		this.model.clearLook();
 		this.model.scatter();
 		this.model.setFactor(0);
@@ -505,6 +659,8 @@ export class Lesson {
 
 	/** A trigger press on a part. This is where formative feedback is produced. */
 	select(id) {
+		// Any part press dismisses an open callout: the student has moved on to something else.
+		if (id) this.closeCallout();
 		if (!id) {
 			if (this.done) this.reset();
 			return null;
@@ -613,6 +769,24 @@ export class Lesson {
 		return this.ray.intersectObject(this.continueBtn.userData.plate, false).length > 0;
 	}
 
+	/**
+	 * F3: size each controller's ray line to what it is pointing at and park the cursor dot on
+	 * the hit. Only the active controller drives selection, so the other one shows a short,
+	 * faint stub with no cursor — two full-length lines read as two pointers that both work.
+	 */
+	updatePointers(controllers, active, hitDist) {
+		const idle = this.data.runtime?.rayIdleMetres ?? 1.5;
+		for (const c of [controllers?.left, controllers?.right]) {
+			if (!c?.rayLine) continue;
+			const on = c === active;
+			const len = on ? hitDist ?? idle : 0.15;
+			c.rayLine.scale.z = len;
+			c.rayLine.material.opacity = on ? (hitDist != null ? 0.85 : 0.45) : 0.2;
+			c.cursor.visible = on && hitDist != null;
+			c.cursor.position.z = -len;
+		}
+	}
+
 	/** Per-frame: tweens, hover picking, label billboards. */
 	update(dt, controllers) {
 		for (const tw of this.tweens) {
@@ -628,13 +802,46 @@ export class Lesson {
 		// tilt made it read edge-on at the edge of the Quest field of view.
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
 
+		if (this.callouts.length) this.placeCallouts();
+		if (this.calloutHover != null) this.callouts[this.calloutHover].hover.quaternion.copy(camQ);
+
 		const ct = controllers?.right || controllers?.left;
+		let hitDist = null;
 		if (ct?.raySpace?.visible) {
 			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 			this.ray.set(o, d);
-			const hit = this.model.pick(this.ray, this.pickOpts());
-			this.hoverPart(hit);
+			// Priority: Continue plate, then callout dots, then parts. A dot sits on the surface
+			// of its part, so without this order the part would always shadow it.
+			const btn = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
+			const dot = btn ? null : this.pickCallout(this.ray);
+			if (btn) {
+				this.hoverCallout(-1);
+				this.hoverPart(null);
+				hitDist = btn.distance;
+			} else if (dot) {
+				this.hoverCallout(dot.index);
+				this.hoverPart(null);
+				hitDist = dot.distance;
+			} else {
+				this.hoverCallout(-1);
+				const hits = this.model.hitList(this.ray, this.pickOpts());
+				this.hoverPart(this.model.idOfHit(hits[0]) ?? null);
+				if (hits[0]) hitDist = hits[0].distance;
+			}
+		}
+		this.updatePointers(controllers, ct, hitDist);
+
+		if (this.calloutOpen != null) {
+			// Leader from the card's nearest bottom corner back to the dot, so the reader can see
+			// which structure the card is about even after the parts have moved.
+			const c = this.callouts[this.calloutOpen];
+			const from = c.dot.getWorldPosition(new THREE.Vector3());
+			const pg = this.calloutPanel.group;
+			const toward = this.ui.calloutX > this.ui.panelX ? -1 : 1;
+			const corner = new THREE.Vector3((toward * this.ui.panelW) / 2, -(this.calloutPanel.height || 0.04), 0);
+			pg.updateMatrixWorld();
+			updateLeaderLine(this.calloutLine, from, pg.localToWorld(corner));
 		}
 
 		if (this.labelGroup.visible) this.updateLabels();
@@ -717,6 +924,7 @@ export class Lesson {
 			flow: this.flow,
 			find: { asked: this.find.asked, left: this.find.queue.length },
 			hover: this.hover,
+			callout: { hover: this.callouts[this.calloutHover]?.spec.id ?? null, open: this.callouts[this.calloutOpen]?.spec.id ?? null, shown: this.callouts.filter((c) => c.marker.visible).length },
 			ready: !!this.continueOn,
 			done: this.done,
 			drawCalls: this.renderer?.info?.render?.calls,

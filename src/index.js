@@ -115,6 +115,7 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			else if (e.key === 'ArrowLeft') lesson.prev();
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
 			else if (e.key === 'r') lesson.reset();
+			else if (e.key === 'c') lesson.calloutOpen != null ? lesson.closeCallout() : lesson.openCallout(lesson.callouts.findIndex((c) => c.marker.visible));
 		});
 	}
 }
@@ -128,7 +129,9 @@ function onFrame(delta, _time, globals) {
 	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
 		if (lesson.done) lesson.reset();
 		else if (lesson.pickButton(controllers)) lesson.next();
-		else lesson.select(lesson.hover);
+		else if (lesson.pressCallout()) {
+			// consumed: a callout dot was under the ray (F1)
+		} else lesson.select(lesson.hover);
 	}
 
 	if (hud) {

@@ -399,6 +399,67 @@
       "source": "adapted from OpenStax Anatomy and Physiology, Ch. 19 review question"
     }
   ],
+  "callouts": [
+    {
+      "id": "co-ra",
+      "anchor": "UBERON:0002078",
+      "steps": [
+        "s1-orient",
+        "s2-explode"
+      ],
+      "offset": [
+        -0.02,
+        0.05,
+        0.02
+      ],
+      "title": "Right atrium",
+      "text": "The first stop for blood returning from the body. It is low in oxygen here."
+    },
+    {
+      "id": "co-mitral",
+      "anchor": "UBERON:0002135",
+      "steps": [
+        "s2-explode"
+      ],
+      "offset": [
+        0,
+        0.04,
+        0.02
+      ],
+      "title": "Mitral valve",
+      "text": "Two flaps between the left atrium and left ventricle. It snaps shut when the ventricle squeezes, so blood can only go forward."
+    },
+    {
+      "id": "co-septum",
+      "anchor": "UBERON:0002094",
+      "steps": [
+        "s3-compare"
+      ],
+      "offset": [
+        0,
+        0.05,
+        0.02
+      ],
+      "title": "Septum",
+      "text": "A solid muscle wall between the left and right pumps. It keeps low-oxygen blood (right side) from mixing with high-oxygen blood (left side)."
+    },
+    {
+      "id": "co-lv-wall",
+      "anchor": "UBERON:0002084",
+      "steps": [
+        "s3-compare"
+      ],
+      "offset": [
+        0.02,
+        -0.03,
+        0.03
+      ],
+      "title": "Why the left wall is thicker",
+      "text": "The left ventricle pumps blood around the whole body, so its wall is about three times thicker than the right ventricle's, which only reaches the lungs.",
+      "video": "anatoge-capture",
+      "videoAt": 0
+    }
+  ],
   "runtime": {
     "note": "Tunable by a teacher without touching code. Explode gain was measured in a browser run: gain 0.55 gave 14/14 draw calls with a 0.96 m exploded extent; gain 1.0 pushed parts out of the camera frustum (draw calls fell 14 -> 11).",
     "explodeGain": 0.27,
