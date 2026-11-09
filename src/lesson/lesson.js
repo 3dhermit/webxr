@@ -65,6 +65,7 @@ export class Lesson {
 		// Named so the in-headset tuner can change plate size/spacing without a rebuild of
 		// anything but the UI itself.
 		this.quizPlateMul = (data.runtime || {}).ui?.quizPlateMul ?? 2.6;
+		this.maxExtraSpread = (data.runtime || {}).maxExtraSpread ?? 1.2;
 		this.quizPitchMul = (data.runtime || {}).ui?.quizPitchMul ?? 1.22;
 
 		this.t = new THREE.Vector3();
@@ -120,6 +121,9 @@ export class Lesson {
 		this.videoFromCallout = null;
 		// F4: squeeze-to-grab. Trigger stays 'select/advance'; squeeze is 'move this aside'.
 		this.grab = null;
+		// Student-driven extra spread, on top of whatever the step authored.
+		this.stepFactor = 0;
+		this.extraSpread = 0;
 
 		this.buildUI();
 	}
@@ -629,6 +633,25 @@ export class Lesson {
 		this.model.setGrabWorld(this.grab.id, handWorld.clone().add(this.grab.offset));
 	}
 
+	/**
+	 * Push the explosion further apart, or back together. Driven by the thumbstick.
+	 *
+	 * The authored spread leaves 5 of the 14 parts hidden behind another from a seated eye
+	 * position, and no single fixed value fixes that for everyone: the separation that reveals
+	 * a papillary muscle also lifts the valve plane far above the gaze. So the amount is the
+	 * student's to choose, and it resets with each step.
+	 */
+	adjustSpread(delta) {
+		if (this.video.isOpen || this.quiz) return false;
+		const next = THREE.MathUtils.clamp(this.extraSpread + delta, 0, this.maxExtraSpread);
+		if (Math.abs(next - this.extraSpread) < 1e-5) return false;
+		this.extraSpread = next;
+		// Only drive the model directly when no tween is running: the tween loop adds the boost
+		// itself, so doing it here as well would double-apply for those frames.
+		if (!this.tweens.length) this.model.setFactor(this.stepFactor + this.extraSpread);
+		return true;
+	}
+
 	/** Hover tint for the two video plates. */
 	setVideoBtn(btn, on) {
 		btn.userData.plate.material.color.setHex(on ? 0x4d8fd6 : 0x2f6fb3);
@@ -950,6 +973,9 @@ export class Lesson {
 		}
 
 		const target = Array.isArray(a.explode) ? a.explode[1] : a.explode ?? 0;
+		// A new step owns the arrangement, so the previous step's extra spread is dropped.
+		this.stepFactor = target;
+		this.extraSpread = 0;
 		if (a.reassemble) this.model.scatter();
 		this.tweenFactor(target, a.explode === 0 ? 0.6 : 5.0);
 
@@ -1159,6 +1185,7 @@ export class Lesson {
 		this.grabEnd();
 		this.model.returnMoved();
 		this.model.clearLook();
+		this.extraSpread = 0;
 		this.model.scatter();
 		this.model.setFactor(0);
 		this.enterStep(0);
@@ -1351,7 +1378,7 @@ export class Lesson {
 			tw.t += dt;
 			const k = Math.min(1, tw.t / tw.dur);
 			const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
-			this.model.setFactor(tw.from + (tw.to - tw.from) * e);
+			this.model.setFactor(tw.from + (tw.to - tw.from) * e + this.extraSpread);
 		}
 		this.tweens = this.tweens.filter((tw) => tw.t < tw.dur);
 
@@ -1542,6 +1569,7 @@ export class Lesson {
 			level: this.level,
 			eyeY: +this.ui.eyeY.toFixed(3),
 			factor: +this.model.factor.toFixed(3),
+			extraSpread: +this.extraSpread.toFixed(2),
 			flow: this.flow,
 			find: { asked: this.find.asked, left: this.find.queue.length },
 			hover: this.hover,

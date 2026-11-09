@@ -91,6 +91,33 @@ export class Tuner {
 				set: (v) => this.replan(() => (L.uiDeg.gap = v)),
 			},
 			{
+				key: 'explodeGain',
+				label: 'explode spread',
+				unit: 'x',
+				step: 0.05,
+				min: 0.1,
+				max: 2.5,
+				get: () => L.model.explodeGain,
+				set: (v) => {
+					L.model.explodeGain = v;
+					L.model.apply();
+					// Card placement is measured from the cloud's angular extent, so a wider
+					// explosion has to re-plan the UI or the prompt ends up inside the anatomy.
+					L.planUi();
+					L.applyUiLayout();
+				},
+			},
+			{
+				key: 'maxExtraSpread',
+				label: 'stick spread cap',
+				unit: 'x',
+				step: 0.1,
+				min: 0,
+				max: 3,
+				get: () => L.maxExtraSpread,
+				set: (v) => (L.maxExtraSpread = v),
+			},
+			{
 				key: 'calloutDotScale',
 				label: 'callout dot',
 				unit: 'x',

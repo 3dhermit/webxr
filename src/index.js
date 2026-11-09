@@ -12,10 +12,10 @@
  */
 import * as THREE from 'three';
 
+import { XR_AXES, XR_BUTTONS } from 'gamepad-wrapper';
 import { AnatomyModel } from './lesson/anatomy.js';
 import { Lesson } from './lesson/lesson.js';
 import { Tuner } from './lesson/tune.js';
-import { XR_BUTTONS } from 'gamepad-wrapper';
 import { init } from './init.js';
 import lessonData from './lessons/heart.json';
 import { makeText } from './lesson/text.js';
@@ -144,6 +144,8 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
 			else if (e.key === 'r') lesson.reset();
 			else if (e.key === 'x') lesson.model.returnMoved();
+			else if (e.key === '+' || e.key === '=') lesson.adjustSpread(0.15);
+			else if (e.key === '-') lesson.adjustSpread(-0.15);
 			else if (e.key === 'b') { lesson.hoverNav('back'); lesson.pressNav(); }
 			else if (e.key === 'R') { lesson.hoverNav('reset'); lesson.pressNav(); }
 			else if (e.key === 'v')
@@ -172,6 +174,16 @@ function onFrame(delta, _time, globals) {
 
 	lesson.update(delta, controllers);
 	if (tuner) tuner.update(delta, controllers);
+
+	// Thumbstick spreads the explosion further apart or back together. The authored spread
+	// leaves several parts hidden behind others, and how far is far enough depends on where
+	// the student's head is, so it is theirs to set. Suppressed in ?tune=1, where the stick
+	// belongs to the tuner.
+	if (!tuner) {
+		const sc = controllers.right || controllers.left;
+		const sy = sc?.gamepad?.getAxis?.(XR_AXES.THUMBSTICK_Y) ?? 0;
+		if (Math.abs(sy) > 0.18) lesson.adjustSpread(-sy * delta * 0.9);
+	}
 
 	// F4: squeeze grabs and moves a part; the trigger keeps its 'select / advance' meaning.
 	// Both hands are polled so either controller can grab, and a release is matched to the
