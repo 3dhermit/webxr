@@ -10,6 +10,8 @@
  * Everything a student reads or presses is geometry inside the scene, because Quest Browser does
  * not support DOM overlay in immersive-vr. The ?debug=1 HUD exists only on a developer's monitor.
  */
+import * as THREE from 'three';
+
 import { AnatomyModel } from './lesson/anatomy.js';
 import { Lesson } from './lesson/lesson.js';
 import { XR_BUTTONS } from 'gamepad-wrapper';
@@ -27,6 +29,15 @@ let lesson;
 let status;
 let hud;
 let ready = false;
+// Defect #3: the lesson UI is planned around an authored 1.45 m eye height. Measure the
+// student's real one from the headset instead. Samples are collected over the first XR
+// frames and reduced with a MEDIAN, because head pose on session entry is noisy (the
+// student is often still lifting the headset on) and one bad frame should not set the
+// layout for the whole lesson.
+let eyeSamples = null;
+const EYE_SAMPLES = 45;
+// Reused so the sampler allocates nothing on the XR frame path.
+const _eye = new THREE.Vector3();
 
 async function boot() {
 	model = await AnatomyModel.load({
@@ -86,6 +97,15 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 	// Quest 2 has a narrow lens sweet spot; fixed foveation buys resolution where the eye looks.
 	renderer.xr.addEventListener?.('sessionstart', () => renderer.xr.setFoveation?.(1));
 
+	// Re-measure on every entry: 28 headsets get passed between students of different heights,
+	// and a layout calibrated for the previous child is exactly the bug this fixes.
+	renderer.xr.addEventListener?.('sessionstart', () => {
+		eyeSamples = [];
+	});
+	renderer.xr.addEventListener?.('sessionend', () => {
+		eyeSamples = null;
+	});
+
 	status = makeText({
 		fontSize: 0.03,
 		maxWidth: 0.6,
@@ -115,6 +135,8 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			else if (e.key === 'ArrowLeft') lesson.prev();
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
 			else if (e.key === 'r') lesson.reset();
+			else if (e.key === '[') lesson.calibrateEye(1.28); // simulate a grade-6 student
+			else if (e.key === ']') lesson.calibrateEye(1.45); // back to the authored adult height
 			else if (e.key === 'c') lesson.calloutOpen != null ? lesson.closeCallout() : lesson.openCallout(lesson.callouts.findIndex((c) => c.marker.visible));
 		});
 	}
@@ -123,13 +145,27 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 function onFrame(delta, _time, globals) {
 	if (!ready) return;
 	const controllers = globals.controllers;
+
+	// Collect head height until we have enough samples, then calibrate once (see eyeSamples).
+	if (eyeSamples && globals.renderer.xr.isPresenting) {
+		const y = globals.camera.getWorldPosition(_eye).y;
+		if (y > 0.8 && y < 2.2) eyeSamples.push(y);
+		if (eyeSamples.length >= EYE_SAMPLES) {
+			const sorted = eyeSamples.slice().sort((a, b) => a - b);
+			lesson.calibrateEye(sorted[Math.floor(sorted.length / 2)]);
+			eyeSamples = null;
+		}
+	}
+
 	lesson.update(delta, controllers);
 
 	const ct = controllers.right || controllers.left;
 	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
 		if (lesson.done) lesson.reset();
 		else if (lesson.pickButton(controllers)) lesson.next();
-		else if (lesson.pressCallout()) {
+		else if (lesson.pressQuiz()) {
+			// consumed: a quiz choice plate was under the ray (defect #1)
+		} else if (lesson.pressCallout()) {
 			// consumed: a callout dot was under the ray (F1)
 		} else lesson.select(lesson.hover);
 	}
@@ -138,7 +174,7 @@ function onFrame(delta, _time, globals) {
 		const s = lesson.state();
 		hud.textContent = [
 			`step ${s.step}  ${s.stepId}  level=${s.level}`,
-			`explode ${s.factor}  hover=${s.hover ?? '-'}  ready=${s.ready}`,
+			`explode ${s.factor}  hover=${s.hover ?? '-'}  ready=${s.ready}  eyeY=${s.eyeY}`,
 			`flow ${s.flow.i}/8 misses=${s.flow.misses}   find left=${s.find.left}`,
 			`draw ${s.drawCalls}  tris ${s.tris}`,
 		].join('\n');

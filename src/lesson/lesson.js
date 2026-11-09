@@ -192,7 +192,7 @@ export class Lesson {
 	}
 
 	buildUI() {
-		const { panelW, panelZ, promptText, feedText, btnX, btnY, btnW, eyeY } = this.ui;
+		const { panelW, promptText, feedText, btnW } = this.ui;
 		// One panel carries the step counter inside it. A separate floating counter line printed
 		// straight through the prompt panel and read as doubled text.
 		this.prompt = new Panel({ width: panelW, fontSize: promptText });
@@ -202,12 +202,9 @@ export class Lesson {
 		// prompt's height and the extra lines spill off it onto the model.
 		this.prompt.onfit = () => this.relayout();
 		this.feedback.onfit = () => this.relayout();
-		this.prompt.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
-		this.feedback.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
 		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
-		this.continueBtn.position.set(btnX, btnY, panelZ);
 		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn);
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
@@ -220,8 +217,96 @@ export class Lesson {
 		this.calloutLine.visible = false;
 		this.root.add(this.calloutPanel.group, this.calloutLine);
 
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group];
-		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
+		// Defect #2: correctness was signalled by COLOUR ALONE — a green card for right, a red
+		// card for wrong. With red-green colour vision deficiency at ~8% in boys, one or two
+		// students in a class of 28 could not read the single most important signal the lesson
+		// produces. Shape is now redundant with hue: a filled disc means right, a cross means
+		// wrong. Geometry is used rather than a glyph because the bundled monospace font has no
+		// guaranteed coverage for check/cross codepoints.
+		const br = this.ui.feedText * 0.52;
+		const okMark = new THREE.Mesh(
+			new THREE.CircleGeometry(br, 24),
+			new THREE.MeshBasicMaterial({ color: OK }),
+		);
+		const badMark = new THREE.Group();
+		for (const rot of [Math.PI / 4, -Math.PI / 4]) {
+			const bar = new THREE.Mesh(
+				new THREE.PlaneGeometry(br * 2.2, br * 0.5),
+				new THREE.MeshBasicMaterial({ color: BAD }),
+			);
+			bar.rotation.z = rot;
+			badMark.add(bar);
+		}
+		okMark.visible = false;
+		badMark.visible = false;
+		this.badge = new THREE.Group();
+		this.badge.add(okMark, badMark);
+		this.badge.userData = { ok: okMark, bad: badMark };
+		this.badge.visible = false;
+		this.root.add(this.badge);
+
+		// Defect #1: heart.json authors four cited quiz questions and NOTHING read them -
+		// `npm run validate` even counted them ("quiz 4"), so the gate reported healthy content
+		// that reached no student. They are now a real step with four pickable choice plates.
+		this.quizGroup = new THREE.Group();
+		this.quizPlates = [];
+		const qw = this.ui.panelW * 0.98;
+		const qh = this.ui.feedText * 2.6;
+		for (let i = 0; i < 4; i++) {
+			const plate = makeButton({ label: '', width: qw, height: qh, fontSize: this.ui.feedText * 0.92 });
+			plate.userData.choice = i;
+			this.quizPlates.push(plate);
+			this.quizGroup.add(plate);
+		}
+		this.quizGroup.visible = false;
+		this.root.add(this.quizGroup);
+		this.quiz = null;
+
+		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge];
+		this.applyUiLayout();
+		for (const head of this.uiParts) head.lookAt(0, this.ui.eyeY, 0);
+	}
+
+	/**
+	 * Push the planned layout onto the objects. Separate from buildUI so a recalibration can
+	 * re-place everything without tearing down panels that currently hold the student's text.
+	 */
+	applyUiLayout() {
+		const { panelX, panelBottom, panelZ, btnX, btnY } = this.ui;
+		this.prompt.group.position.set(panelX, panelBottom, panelZ);
+		this.feedback.group.position.set(panelX, panelBottom, panelZ);
+		this.continueBtn.position.set(btnX, btnY, panelZ);
+		if (this.hoverLine) this.hoverLine.position.set(panelX, panelBottom - 0.022, panelZ);
+		this.placeCalloutPanel();
+		if (this.quizPlates?.length) this.placeQuiz();
+		this.relayout();
+	}
+
+	/**
+	 * Re-plan the UI around the student's REAL eye height.
+	 *
+	 * Every card position derives from `ui.eyeY`, which was authored as a single constant
+	 * (1.45 m) — an adult's eye height. This lesson ships a "ms" register for grades 6-8,
+	 * where eye height is nearer 1.25-1.35 m, so those students got the whole interface
+	 * floating above their natural gaze with no way to fix it. The headset already knows
+	 * the answer: with a local-floor reference space the camera's world Y *is* head height.
+	 *
+	 * Panel widths are deliberately NOT rebuilt. A Panel's backdrop geometry is fixed at
+	 * construction, and tearing the panels down mid-lesson would discard the text the
+	 * student is reading; the residual width error from a 20 cm height change is far
+	 * smaller than the vertical error this corrects.
+	 */
+	calibrateEye(y) {
+		// Reject implausible samples outright: a dropped tracking frame reports 0, and
+		// calibrating to the floor would throw the lesson out of view entirely.
+		if (!Number.isFinite(y) || y < 0.8 || y > 2.2) return false;
+		// Ignore churn. Re-planning on every tiny head bob would make the cards swim.
+		if (Math.abs(y - this.ui.eyeY) < 0.03) return false;
+		this.ui.eyeY = y;
+		this.planUi();
+		this.applyUiLayout();
+		this.fire('eye-calibrated');
+		return true;
 	}
 
 	/** Callout card grows UP from the same bottom line as the prompt stack, on the far side. */
@@ -237,7 +322,7 @@ export class Lesson {
 		if (!st) return false;
 		if (Array.isArray(c.spec.steps)) return c.spec.steps.includes(st.id);
 		const a = st.action || {};
-		return !a.flow && !a.reassemble;
+		return !a.flow && !a.reassemble && !a.quiz;
 	}
 
 	refreshCallouts() {
@@ -324,6 +409,129 @@ export class Lesson {
 		if (this.calloutOpen === this.calloutHover) this.closeCallout();
 		else this.openCallout(this.calloutHover);
 		return true;
+	}
+
+	/**
+	 * Lay the choice plates out in a vertical stack on the side of the view the prompt card
+	 * does not use, measured from the same angular spec as everything else.
+	 */
+	placeQuiz() {
+		const qh = this.ui.feedText * 2.6;
+		const pitch = qh * 1.22;
+		const top = this.ui.eyeY + this.ui.panelZ * Math.tan(THREE.MathUtils.degToRad(-4));
+		this.quizPlates.forEach((pl, i) => {
+			pl.position.set(this.ui.calloutX, top - i * pitch, this.ui.panelZ);
+		});
+	}
+
+	/** Start the quiz: question order as authored, CHOICES shuffled (see shuffleChoices). */
+	enterQuiz() {
+		const qs = this.data.quiz || [];
+		this.quiz = { i: 0, score: 0, answered: false, total: qs.length, order: null };
+		this.quizGroup.visible = qs.length > 0;
+		this.placeQuiz();
+		if (qs.length) this.showQuestion(0);
+		return qs.length;
+	}
+
+	/**
+	 * Present one question. Choice order is randomised per question because every authored
+	 * `answer` is index 0 - rendered as written, the correct option is always the first plate
+	 * and the quiz measures pattern-spotting instead of anatomy.
+	 */
+	showQuestion(i) {
+		const q = this.data.quiz[i];
+		if (!q) return;
+		this.quiz.i = i;
+		this.quiz.answered = false;
+		const idx = q.choices.map((_, k) => k);
+		for (let k = idx.length - 1; k > 0; k--) {
+			const j = Math.floor(Math.random() * (k + 1));
+			[idx[k], idx[j]] = [idx[j], idx[k]];
+		}
+		this.quiz.order = idx;
+		this.prompt.set(`Question ${i + 1} of ${this.quiz.total}\n\n${q.q}`);
+		this.quizPlates.forEach((pl, k) => {
+			const has = k < idx.length;
+			pl.visible = has;
+			if (!has) return;
+			pl.userData.caption.text = q.choices[idx[k]];
+			pl.userData.caption.sync();
+			this.setPlate(pl, 'idle');
+		});
+		this.clearSay();
+		this.setContinueEnabled(false);
+		this.relayout();
+	}
+
+	/** Highlight the plate under the ray, unless the question is already scored. */
+	hoverQuiz(i) {
+		if (this.quizHover === i) return;
+		const prev = this.quizPlates?.[this.quizHover];
+		if (prev && this.quiz && !this.quiz.answered) prev.userData.plate.material.color.setHex(0x2f6fb3);
+		this.quizHover = i;
+		const pl = this.quizPlates?.[i];
+		if (pl && this.quiz && !this.quiz.answered) pl.userData.plate.material.color.setHex(0x4d8fd6);
+	}
+
+	/** Plate colouring. Shape/position never changes, so this is never the only signal. */
+	setPlate(pl, kind) {
+		const col = { idle: 0x2f6fb3, right: 0x2f8f4f, wrong: 0x7d3027, dim: 0x3a4550 }[kind];
+		pl.userData.plate.material.color.setHex(col);
+		pl.userData.caption.color = kind === 'dim' ? 0x8a97a3 : 0xffffff;
+		pl.userData.caption.sync();
+	}
+
+	/** Nearest visible choice plate under the ray, or null. */
+	pickQuiz(ray) {
+		if (!this.quizGroup.visible) return null;
+		let best = null;
+		for (const pl of this.quizPlates) {
+			if (!pl.visible) continue;
+			const hit = ray.intersectObject(pl.userData.plate, false)[0];
+			if (hit && (!best || hit.distance < best.distance)) best = { plate: pl, distance: hit.distance };
+		}
+		return best;
+	}
+
+	/** Trigger on a choice. Returns true when the press was consumed. */
+	pressQuiz() {
+		if (!this.quiz || this.quizHover == null) return false;
+		if (this.quiz.answered) return true; // already scored; Continue moves on
+		const q = this.data.quiz[this.quiz.i];
+		const picked = this.quiz.order[this.quizHover];
+		const right = picked === q.answer;
+		this.quiz.answered = true;
+		if (right) this.quiz.score += 1;
+		// Always reveal which option was correct: a wrong answer with no correction teaches
+		// nothing, and this lesson's whole stance is immediate formative feedback.
+		this.quizPlates.forEach((pl, k) => {
+			if (!pl.visible) return;
+			if (this.quiz.order[k] === q.answer) this.setPlate(pl, 'right');
+			else if (k === this.quizHover) this.setPlate(pl, 'wrong');
+			else this.setPlate(pl, 'dim');
+		});
+		this.say(right ? `Correct. ${this.textOf(q.why)}` : `Not quite. ${this.textOf(q.why)}`, right ? OK : BAD);
+		this.setContinueEnabled(true);
+		this.fire(right ? 'quiz-ok' : 'quiz-miss');
+		return true;
+	}
+
+	/** Continue pressed during the quiz: next question, or wrap up. Returns true if handled. */
+	nextQuestion() {
+		if (!this.quiz) return false;
+		if (!this.quiz.answered) return true; // must answer before advancing
+		if (this.quiz.i < this.quiz.total - 1) {
+			this.showQuestion(this.quiz.i + 1);
+			return true;
+		}
+		// Score is spoken once and never stored - the classroom rule is no records.
+		const line = `${this.quiz.score} of ${this.quiz.total} correct.`;
+		this.quizGroup.visible = false;
+		this.quizHover = null;
+		this.quiz = null;
+		this.say(`You answered ${line}`, MUTED);
+		return false; // let the caller fall through to finish()
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -424,6 +632,12 @@ export class Lesson {
 			const first = this.flowParts()[0];
 			if (first) this.revealPathTo(first);
 		}
+		if (!a.quiz && (this.quiz || this.quizGroup.visible)) {
+			// Leaving the quiz by any route (prev(), reset()) must take its plates with it.
+			this.quiz = null;
+			this.quizGroup.visible = false;
+			this.quizHover = null;
+		}
 		if (a.reassemble) {
 			this.find = { queue: this.shuffle(this.data.tiers.core.filter((id) => this.model.parts.has(id))), asked: null, misses: 0 };
 			this.nextAsk();
@@ -435,9 +649,12 @@ export class Lesson {
 
 		this.prompt.set(`Step ${this.i + 1} of ${this.steps.length} · ${st.title}\n\n${st.verb.toUpperCase()} — ${this.textOf(st.prompt)}`);
 		this.say(this.misconceptionFor(st.id));
-		this.setContinueEnabled(!a.flow && !a.reassemble);
+		this.setContinueEnabled(!a.flow && !a.reassemble && !a.quiz);
 		this.relayout();
 		this.refreshCallouts();
+		// Started last on purpose: showQuestion() writes the question onto the prompt card, so
+		// it has to run after the generic step card above or the question never appears.
+		if (a.quiz) this.enterQuiz();
 		this.fire('step', st.id);
 		return st;
 	}
@@ -514,12 +731,26 @@ export class Lesson {
 	say(msg, color = MUTED) {
 		if (!msg) return; // most callers pass an optional line; an absent line must not wipe feedback
 		this.feedback.set(msg, color);
+		// The semantic is derived from the colour constant rather than passed separately: OK,
+		// BAD and MUTED exist precisely to mean right / wrong / neutral, so reading them here
+		// keeps one source of truth and no call site can set a badge that contradicts its card.
+		this.setBadge(color === OK ? 'ok' : color === BAD ? 'bad' : null);
 		this.relayout();
+	}
+
+	/** Show the shape that duplicates the feedback colour, or none for neutral text. */
+	setBadge(kind) {
+		const b = this.badge?.userData;
+		if (!b) return;
+		b.ok.visible = kind === 'ok';
+		b.bad.visible = kind === 'bad';
+		this.badgeKind = kind;
 	}
 
 	/** Explicit wipe. `say('')` cannot do this: `say` ignores empty messages on purpose. */
 	clearSay() {
 		this.feedback.set('', MUTED);
+		this.setBadge(null);
 		this.relayout();
 	}
 
@@ -539,6 +770,17 @@ export class Lesson {
 		this.feedback.back.visible = fh > 0;
 		this.feedback.group.position.y = b + fh;
 		this.prompt.group.position.y = b + fh + gap + ph;
+		// Badge rides just outside the card's outer edge (away from the anatomy) on the first
+		// text line, and disappears with the card so an empty panel shows no orphan mark.
+		if (this.badge) {
+			const outward = Math.sign(this.ui.panelX) || -1;
+			this.badge.position.set(
+				this.ui.panelX + outward * (this.ui.panelW / 2 + this.ui.feedText * 0.95),
+				b + fh - this.ui.feedText * 0.75,
+				this.ui.panelZ,
+			);
+			this.badge.visible = fh > 0 && !!this.badgeKind;
+		}
 		this.panelBottomY = b;
 	}
 
@@ -560,6 +802,8 @@ export class Lesson {
 
 	next() {
 		if (!this.continueOn) return false;
+		// During the quiz, Continue steps through questions; only the last one falls through.
+		if (this.quiz && this.nextQuestion()) return true;
 		if (this.i >= this.steps.length - 1) {
 			this.finish();
 			return true;
@@ -593,6 +837,9 @@ export class Lesson {
 		this.done = false;
 		this.flow = null;
 		this.find = { queue: [], asked: null, misses: 0 };
+		this.quiz = null;
+		this.quizHover = null;
+		if (this.quizGroup) this.quizGroup.visible = false;
 		this.tweens = [];
 		this._lit = null;
 		if (this.hover) this.model.highlight(this.hover, false);
@@ -672,7 +919,7 @@ export class Lesson {
 			const want = this.flowParts();
 			const expect = want[this.flow.i];
 			if (id === expect) {
-				this.model.flash(id, 0x2f8f4f);
+				this.model.flash(id, 0x2f8f4f, 1);
 				this.flow.i += 1;
 				this.flow.misses = 0;
 				const hop = this.nextWaypointAfter(this.flow.i);
@@ -686,7 +933,7 @@ export class Lesson {
 				return 'ok';
 			}
 			this.flow.misses += 1;
-			this.model.flash(id, 0xa33A2A);
+			this.model.flash(id, 0xa33A2A, 2);
 			const prev = this.partName(want[Math.max(0, this.flow.i - 1)]);
 			const eye = this.camera.getWorldPosition(new THREE.Vector3());
 			if (this.isHiddenFromEye(expect, eye))
@@ -708,14 +955,14 @@ export class Lesson {
 			if (!this.find.asked) return null;
 			if (id === this.find.asked) {
 				this.model.assemble(id);
-				this.model.flash(id, 0x2f8f4f);
+				this.model.flash(id, 0x2f8f4f, 1);
 				this.find.queue.shift();
 				this.fire('name-ok');
 				this.nextAsk();
 				return 'ok';
 			}
 			this.find.misses += 1;
-			this.model.flash(id, 0xa33A2A);
+			this.model.flash(id, 0xa33A2A, 2);
 			const eye = this.camera.getWorldPosition(new THREE.Vector3());
 			const want = this.find.asked;
 			// Speak in student-facing sentences built from lesson vocab, never from a raw registry
@@ -814,11 +1061,18 @@ export class Lesson {
 			// Priority: Continue plate, then callout dots, then parts. A dot sits on the surface
 			// of its part, so without this order the part would always shadow it.
 			const btn = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
-			const dot = btn ? null : this.pickCallout(this.ray);
+			const qz = btn ? null : this.pickQuiz(this.ray);
+			const dot = btn || qz ? null : this.pickCallout(this.ray);
+			if (qz) this.hoverQuiz(qz.plate.userData.choice);
+			else this.hoverQuiz(null);
 			if (btn) {
 				this.hoverCallout(-1);
 				this.hoverPart(null);
 				hitDist = btn.distance;
+			} else if (qz) {
+				this.hoverCallout(-1);
+				this.hoverPart(null);
+				hitDist = qz.distance;
 			} else if (dot) {
 				this.hoverCallout(dot.index);
 				this.hoverPart(null);
@@ -920,10 +1174,13 @@ export class Lesson {
 			step: this.i + 1,
 			stepId: st?.id,
 			level: this.level,
+			eyeY: +this.ui.eyeY.toFixed(3),
 			factor: +this.model.factor.toFixed(3),
 			flow: this.flow,
 			find: { asked: this.find.asked, left: this.find.queue.length },
 			hover: this.hover,
+			badge: this.badgeKind ?? null,
+			quiz: this.quiz ? { q: this.quiz.i + 1, of: this.quiz.total, score: this.quiz.score, answered: this.quiz.answered } : null,
 			callout: { hover: this.callouts[this.calloutHover]?.spec.id ?? null, open: this.callouts[this.calloutOpen]?.spec.id ?? null, shown: this.callouts.filter((c) => c.marker.visible).length },
 			ready: !!this.continueOn,
 			done: this.done,

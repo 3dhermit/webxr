@@ -9,8 +9,8 @@
     "ms": "Grades 6–8"
   },
   "timeMinutes": {
-    "core": 12,
-    "withDetail": 18
+    "core": 15,
+    "withDetail": 21
   },
   "standards": [
     {
@@ -266,6 +266,24 @@
         "hoverNames": false
       },
       "why": "Cold naming after labels are removed is retrieval practice; it is the part that produces durable memory, and it is also the formative check the student sees instantly."
+    },
+    {
+      "id": "s6-quiz",
+      "verb": "check",
+      "minutes": 3,
+      "title": "Check what stuck",
+      "prompt": {
+        "hs": "Answer four questions. Point at a choice and pull the trigger.",
+        "ms": "Four questions. Point at an answer and pull the trigger."
+      },
+      "outcome": "o1",
+      "action": {
+        "quiz": true,
+        "labels": "none",
+        "explode": 0,
+        "hoverNames": false
+      },
+      "why": "Retrieval under mild pressure, with the reason shown immediately after each answer. Scored for the student only and never recorded."
     }
   ],
   "vocab": [

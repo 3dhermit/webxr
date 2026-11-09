@@ -176,11 +176,29 @@ export class AnatomyModel {
 	}
 
 	/** Green/red answer feedback without changing the anatomical colour. */
-	flash(id, colorHex) {
+	flash(id, colorHex, blinks = 1) {
 		const p = this.parts.get(id);
 		if (!p) return;
-		p.mat.emissive.setHex(colorHex);
-		setTimeout(() => this.highlight(id, false), 700);
+		// Defect #2: colour alone cannot carry correctness. Red-green colour vision deficiency
+		// runs ~8% in boys, and a green flash versus a red one is exactly the comparison those
+		// students cannot make. The BLINK COUNT now carries the same meaning: one held pulse
+		// means right, two quick pulses mean wrong, which reads identically to every student.
+		this._flashTimers = this._flashTimers || new Map();
+		// A new flash on the same part must cancel the old one's timers, or a stray callback
+		// clears the emissive mid-pattern and the blink count stops being countable.
+		(this._flashTimers.get(id) || []).forEach(clearTimeout);
+		const timers = [];
+		const on = 150;
+		const gap = 120;
+		for (let i = 0; i < blinks; i++) {
+			const t0 = i * (on + gap);
+			timers.push(setTimeout(() => p.mat.emissive.setHex(colorHex), t0));
+			// Hold the last pulse longer so a single blink still reads as a deliberate confirm
+			// rather than a glitch.
+			const hold = i === blinks - 1 && blinks === 1 ? 550 : on;
+			timers.push(setTimeout(() => this.highlight(id, false), t0 + hold));
+		}
+		this._flashTimers.set(id, timers);
 	}
 
 	/** Show only `ids`; everything else becomes a faint silhouette (keeps spatial context). */
