@@ -182,7 +182,29 @@ function triggerAction(controllers) {
 	lesson.select(lesson.hover);
 }
 
-function onFrame(delta, _time, globals) {
+// Messages already reported by the frame guard, so a fault that repeats every frame is
+// logged once instead of 72 times a second.
+const frameFaults = new Set();
+
+/**
+ * Frame entry point. three.js only asks for the NEXT frame after this one returns, so a
+ * single exception anywhere in the lesson's per-frame code used to stop rendering for good:
+ * the headset froze on its last image until the page was reloaded. A fault now costs one
+ * frame of lesson logic and is reported, and the lesson keeps running.
+ */
+function onFrame(delta, time, globals) {
+	try {
+		frame(delta, time, globals);
+	} catch (err) {
+		const key = String(err?.message ?? err);
+		if (!frameFaults.has(key)) {
+			frameFaults.add(key);
+			console.error('lesson frame fault (lesson kept running):', err);
+		}
+	}
+}
+
+function frame(delta, _time, globals) {
 	if (!ready) return;
 	const controllers = globals.controllers;
 
@@ -260,7 +282,7 @@ function onFrame(delta, _time, globals) {
 		hud.textContent = [
 			`step ${s.step}  ${s.stepId}  level=${s.level}`,
 			`explode ${s.factor}  hover=${s.hover ?? '-'}  ready=${s.ready}  eyeY=${s.eyeY}`,
-			`flow ${s.flow.i}/8 misses=${s.flow.misses}   find left=${s.find.left}`,
+			`flow ${s.flow?.i ?? 0}/8 misses=${s.flow?.misses ?? 0}   find left=${s.find?.left ?? 0}`,
 			`draw ${s.drawCalls}  tris ${s.tris}`,
 		].join('\n');
 	}

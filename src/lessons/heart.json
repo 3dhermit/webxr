@@ -180,7 +180,7 @@
       "action": {
         "explode": 0,
         "labels": "none",
-        "hoverNames": false
+        "hoverNames": true
       },
       "why": "Committing to a prediction before the model is taken apart makes the later explanation something the student needs, not something they receive."
     },
@@ -281,7 +281,7 @@
         "quiz": true,
         "labels": "none",
         "explode": 0,
-        "hoverNames": false
+        "hoverNames": true
       },
       "why": "Retrieval under mild pressure, with the reason shown immediately after each answer. Scored for the student only and never recorded."
     }

@@ -5,9 +5,28 @@
  */
 import * as THREE from 'three';
 
-import { Panel, makeButton, makeLabel, makeLeaderLine, makeSkinnedButton, makeText, setButtonLabel, updateLeaderLine } from './text.js';
+import { Panel, makeButton, makeLabel, makeLeaderLine, makeSkinnedButton, setButtonLabel, updateLeaderLine } from './text.js';
 import { VideoScreen } from './video.js';
 import { XR_BUTTONS } from 'gamepad-wrapper';
+
+/**
+ * Make a part-name label and its leader line draw over the anatomy.
+ *
+ * A name that pops up beside a part in the middle of an exploded heart is otherwise half
+ * hidden by whichever neighbour happens to be nearer the reader. The depth flags go on a BASE
+ * material handed to troika: its `material` getter returns derived materials (an array of
+ * two, once an outline is set) that inherit from the base, so flags poked onto what the
+ * getter returns are lost - which is why an earlier attempt at this appeared to do nothing.
+ */
+function drawOnTop(label, line) {
+	const text = label.userData.text;
+	text.material = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false });
+	text.renderOrder = 20;
+	line.material.transparent = true;
+	line.material.depthTest = false;
+	line.material.depthWrite = false;
+	line.renderOrder = 19;
+}
 
 const OK = 0x8fe3a0;
 const BAD = 0xff9a8a;
@@ -35,6 +54,21 @@ export class Lesson {
 		// The anatomy and everything anchored to it stays fixed in the room.
 		this.menuRig = new THREE.Group();
 		this.root.add(this.menuRig);
+		// Menus are grouped into CLUSTERS, and a cluster is turned to face the reader as ONE
+		// flat sheet. Turning every card and button to face the eye individually left each at
+		// its own angle: the four answer plates fanned out and crossed each other, and a box
+		// that was oriented before its text had been measured (so before it was in its final
+		// place) could end up edge-on. `pivot` sits at the cluster's anchor and carries the
+		// rotation; `plane` undoes the anchor offset, so members keep their ordinary flat
+		// layout coordinates and need no knowledge of the tilt.
+		this.clusters = {};
+		for (const k of ['card', 'cont', 'nav', 'callout']) {
+			const pivot = new THREE.Group();
+			const plane = new THREE.Group();
+			pivot.add(plane);
+			this.menuRig.add(pivot);
+			this.clusters[k] = { pivot, plane };
+		}
 		this.menuFollowPerSec = data.runtime?.menuFollowPerSec ?? 12;
 		this.menuFollowMaxMetres = data.runtime?.menuFollowMaxMetres ?? 0.35;
 		this.labelGroup = new THREE.Group();
@@ -94,6 +128,21 @@ export class Lesson {
 		this.selLine.visible = false;
 		this.root.add(this.selGroup);
 		this.root.add(this.selLine);
+		// The same kind of label for the part under the pointer: it pops up at the part while
+		// the ray is on it and goes when the ray leaves. It replaces a name line that sat under
+		// the instruction card, away from what it named - and that was never cleared, so the
+		// last name pointed at stayed on screen and ended up printed across the quiz buttons.
+		this.hovId = null;
+		this.hovGroup = new THREE.Group();
+		this.hovLabel = makeLabel(this.data.runtime?.labelTextHeightMetres ?? 0.014, 0xffffff);
+		this.hovLine = makeLeaderLine();
+		this.hovGroup.add(this.hovLabel);
+		this.hovGroup.visible = false;
+		this.hovLine.visible = false;
+		this.root.add(this.hovGroup);
+		this.root.add(this.hovLine);
+		drawOnTop(this.hovLabel, this.hovLine);
+		drawOnTop(this.selLabel, this.selLine);
 		// Which controller is driving. Right-hand-first would leave a left-handed student
 		// pointing with a dead controller whenever both are tracked.
 		this.lastHand = 'right';
@@ -291,7 +340,8 @@ export class Lesson {
 		// Plate is deliberately taller than the old 0.26 ratio: the label is long, and auto-fit
 		// would otherwise shrink it to stay on one line inside a very shallow plate.
 		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.34 });
-		this.menuRig.add(this.prompt.group, this.feedback.group, this.continueBtn);
+		this.clusters.card.plane.add(this.prompt.group, this.feedback.group);
+		this.clusters.cont.plane.add(this.continueBtn);
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
@@ -302,7 +352,7 @@ export class Lesson {
 		this.calloutLine = makeLeaderLine();
 		this.calloutLine.visible = false;
 		// The card is a menu; its leader line stays in room space because it ends on the anatomy.
-		this.menuRig.add(this.calloutPanel.group);
+		this.clusters.callout.plane.add(this.calloutPanel.group);
 		this.root.add(this.calloutLine);
 
 		// Defect #2: correctness was signalled by COLOUR ALONE — a green card for right, a red
@@ -335,7 +385,7 @@ export class Lesson {
 		this.badge.add(okMark, badMark);
 		this.badge.userData = { ok: okMark, bad: badMark };
 		this.badge.visible = false;
-		this.menuRig.add(this.badge);
+		this.clusters.card.plane.add(this.badge);
 
 		// Defect #1: heart.json authors four cited quiz questions and NOTHING read them -
 		// `npm run validate` even counted them ("quiz 4"), so the gate reported healthy content
@@ -363,7 +413,7 @@ export class Lesson {
 			edge: '#ffc489',
 		});
 		this.navBtns = { back: this.backBtn, reset: this.resetBtn };
-		this.menuRig.add(this.backBtn, this.resetBtn);
+		this.clusters.nav.plane.add(this.backBtn, this.resetBtn);
 		this.navHover = null;
 		this.resetArmed = 0;
 
@@ -378,7 +428,7 @@ export class Lesson {
 			this.quizGroup.add(plate);
 		}
 		this.quizGroup.visible = false;
-		this.menuRig.add(this.quizGroup);
+		this.clusters.card.plane.add(this.quizGroup);
 		this.quiz = null;
 
 		// Status box for the three assessed tasks (trace, find-and-name, multiple choice):
@@ -386,9 +436,8 @@ export class Lesson {
 		this.quizStatus = new Panel({ width: this.ui.panelW, fontSize: this.ui.feedText });
 		this.quizStatus.onfit = () => this.relayout();
 		this.quizStatus.group.visible = false;
-		this.menuRig.add(this.quizStatus.group);
+		this.clusters.card.plane.add(this.quizStatus.group);
 
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge, this.backBtn, this.resetBtn, this.quizStatus.group];
 		this.applyUiLayout();
 	}
 
@@ -409,7 +458,6 @@ export class Lesson {
 			this.quizGroup,
 			this.backBtn,
 			this.resetBtn,
-			this.hoverLine,
 			this.quizStatus?.group,
 		].filter(Boolean);
 		for (const o of old) {
@@ -420,7 +468,6 @@ export class Lesson {
 				if (c !== o) c.dispose?.();
 			});
 		}
-		this.hoverLine = null;
 		this.badgeKind = null;
 		this.quizHover = null;
 		this.buildUI();
@@ -436,7 +483,6 @@ export class Lesson {
 		this.prompt.group.position.set(panelX, panelBottom, panelZ);
 		this.feedback.group.position.set(panelX, panelBottom, panelZ);
 		this.continueBtn.position.set(btnX, btnY, panelZ);
-		if (this.hoverLine) this.hoverLine.position.set(panelX, panelBottom - 0.022, panelZ);
 		this.placeCalloutPanel();
 		if (this.quizPlates?.length) this.placeQuiz();
 		this.orientMenus();
@@ -628,9 +674,10 @@ export class Lesson {
 			this.badge,
 			this.backBtn,
 			this.resetBtn,
-			this.hoverLine,
 			this.selGroup,
 			this.selLine,
+			this.hovGroup,
+			this.hovLine,
 			this.quizStatus?.group,
 		].filter(Boolean);
 	}
@@ -1132,6 +1179,9 @@ export class Lesson {
 			const lab = makeLabel(this.data.runtime.labelTextHeightMetres);
 			lab.userData.id = id;
 			lab.userData.line = makeLeaderLine();
+			// Standing labels get the same treatment as the pop-up ones: one tucked behind a
+			// neighbouring part showed only its last three letters.
+			drawOnTop(lab, lab.userData.line);
 			this.labelGroup.add(lab);
 			this.lineGroup.add(lab.userData.line);
 			lab.userData.text.text = this.partName(id);
@@ -1404,15 +1454,30 @@ export class Lesson {
 	}
 
 	/**
-	 * Turn each menu to face the seated eye, upright. Done when the layout changes, not per
-	 * frame. The rig only ever translates, so an orientation computed against the rig's
-	 * design eye stays correct as the rig follows the head.
+	 * Turn each menu CLUSTER to face the seated eye, upright, as one flat sheet. Depends only
+	 * on the planned layout, never on a member's measured size, so it cannot be caught out by
+	 * text that is still being measured. The rig only ever translates, so an orientation
+	 * computed against the rig's design eye stays correct as the rig follows the head.
 	 */
 	orientMenus() {
+		const { panelX, panelBottom, panelZ, calloutX, btnX, btnY, navX, navTopY, navGap } = this.ui;
+		// Continue shares the card's sheet when it sits on the card's side (it is then directly
+		// under the card, and under the answer grid during the quiz); on the other side it is a
+		// sheet of its own.
+		const contHome = Math.sign(btnX) === Math.sign(panelX) ? this.clusters.card : this.clusters.cont;
+		if (this.continueBtn && this.continueBtn.parent !== contHome.plane) contHome.plane.add(this.continueBtn);
 		this.menuRig.updateMatrixWorld(true);
 		const eye = this.menuRig.localToWorld(new THREE.Vector3(0, this.ui.eyeY, 0));
-		for (const m of this.uiParts || []) m?.lookAt(eye);
-		for (const pl of this.quizPlates || []) pl.lookAt(eye);
+		const face = (c, x, y) => {
+			c.pivot.position.set(x, y, panelZ);
+			c.plane.position.set(-x, -y, -panelZ);
+			c.pivot.lookAt(eye);
+		};
+		face(this.clusters.card, panelX, panelBottom);
+		face(this.clusters.cont, btnX, btnY);
+		face(this.clusters.nav, navX, navTopY - navGap / 2);
+		face(this.clusters.callout, calloutX, panelBottom);
+		this.menuRig.updateMatrixWorld(true);
 	}
 
 	/** Per-frame: carry the menus along with the head's POSITION (never its rotation). */
@@ -1525,7 +1590,9 @@ export class Lesson {
 		// tweens and per-part scatter flags used to survive, so the next student inherited the last
 		// student's progress as the first thing they saw.
 		this.done = false;
-		this.flow = null;
+		// Never null: the debug HUD and state() read flow.i every frame, and a null here threw
+		// inside the frame callback - which stops the render loop for good.
+		this.flow = { i: 0, misses: 0 };
 		this.find = { queue: [], asked: null, misses: 0 };
 		this.quiz = null;
 		this.quizHover = null;
@@ -1534,7 +1601,7 @@ export class Lesson {
 		this._lit = null;
 		if (this.hover) this.model.highlight(this.hover, false);
 		this.hover = null;
-		this.hoverSay('');
+		this.showHoverName(null);
 		this.clearSay();
 		this.closeCallout();
 		this.clearSelected();
@@ -1552,11 +1619,61 @@ export class Lesson {
 		if (this.hover === id) return;
 		if (this.hover) this.model.highlight(this.hover, false);
 		this.hover = id;
-		if (id) {
-			this.model.highlight(id, true);
-			const st = this.steps[this.i];
-			if (st?.action?.hoverNames) this.hoverSay(this.partName(id));
-		}
+		if (id) this.model.highlight(id, true);
+		this.showHoverName(id);
+	}
+
+	/**
+	 * Whether pointing at a part may name it on this step: the step's authored `hoverNames`.
+	 * It is off where naming the part IS the task - tracing the blood's path and
+	 * find-and-name - or the pointer would hand over every answer. A press still names what
+	 * was pressed on every step.
+	 */
+	hoverNamesAllowed() {
+		return !!this.steps[this.i]?.action?.hoverNames;
+	}
+
+	/** True when this step already shows a standing name label for the part. */
+	hasStepLabel(id) {
+		return this.labelGroup.visible && this.labelGroup.children.some((c) => c.userData.id === id);
+	}
+
+	/** Pop the name up at the part under the pointer, or take it down (`id` null). */
+	showHoverName(id) {
+		// The pressed part already carries its pinned name; a second copy on top adds nothing.
+		const show =
+			!!id &&
+			id !== this.selId &&
+			!this._maskBackup &&
+			this.hoverNamesAllowed() &&
+			!!this.model.parts.get(id) &&
+			!this.hasStepLabel(id);
+		this.hovId = show ? id : null;
+		this.hovGroup.visible = show;
+		this.hovLine.visible = show;
+		if (!show) return false;
+		this.hovLabel.userData.text.text = this.partName(id);
+		this.hovLabel.userData.text.sync();
+		this.placePartLabel(id, this.hovGroup, this.hovLine);
+		return true;
+	}
+
+	/**
+	 * Put a name label at a part: just above it and on the READER'S side of it, with a leader
+	 * line back to its centre. On the reader's side because a label placed straight above the
+	 * centre ends up inside or behind a neighbouring part once the heart is exploded.
+	 */
+	placePartLabel(id, group, line) {
+		const at = this.model.center(id);
+		const r = this.model.radius(id);
+		const eye = this.camera.getWorldPosition(this._lblEye || (this._lblEye = new THREE.Vector3()));
+		const toEye = (this._lblDir || (this._lblDir = new THREE.Vector3())).copy(eye).sub(at);
+		const d = toEye.length() || 1;
+		toEye.multiplyScalar(1 / d);
+		const label = at.clone().addScaledVector(toEye, Math.min(r + 0.02, d * 0.4));
+		label.y += r * 0.6 + 0.045;
+		group.position.copy(label);
+		updateLeaderLine(line, at, label);
 	}
 
 	/**
@@ -1568,13 +1685,16 @@ export class Lesson {
 	 * badge and the card already carry correctness.
 	 */
 	showSelected(id) {
-		if (!id || !this.model.parts.get(id)) return this.clearSelected();
+		// A part the step already labels is not named a second time beside its own label.
+		if (!id || !this.model.parts.get(id) || this.hasStepLabel(id)) return this.clearSelected();
 		this.selId = id;
 		this.selLabel.userData.text.text = this.partName(id);
 		this.selLabel.userData.text.sync();
 		this.selGroup.visible = true;
 		this.selLine.visible = true;
 		this.placeSelected();
+		// The pointer is usually still on the part just pressed: drop its hover copy.
+		this.showHoverName(this.hover);
 		return true;
 	}
 
@@ -1582,21 +1702,15 @@ export class Lesson {
 		this.selId = null;
 		this.selGroup.visible = false;
 		this.selLine.visible = false;
+		this.showHoverName(this.hover);
 		return false;
 	}
 
 	/** Re-anchor the selected label; the part moves under explode, grab and scatter. */
 	placeSelected() {
 		if (!this.selId || !this.selGroup.visible) return;
-		const s = this.model.group.scale.x;
-		const at = this.model.center(this.selId);
-		// Lifted along the model's own scale so the label clears the surface at any size, and
-		// higher than a callout dot so the two never occupy the same spot.
-		// Lifted clear of the callout markers, which sit ~0.05 model units above the same part
-		// and would otherwise share the spot with the name.
-		const label = at.clone().addScaledVector(new THREE.Vector3(0, 1, 0), 0.13 * s);
-		this.selGroup.position.copy(label);
-		updateLeaderLine(this.selLine, at, label);
+		// Same placement as the hover name, so pressing a part pins the label where it already is.
+		this.placePartLabel(this.selId, this.selGroup, this.selLine);
 	}
 
 	/**
@@ -1653,27 +1767,6 @@ export class Lesson {
 		const d = new THREE.Vector3(0, 0, -1).applyQuaternion(c.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 		this.ray.set(o, d);
 		return true;
-	}
-
-	hoverSay(msg) {
-		if (!this.hoverLine) {
-			// Sized and placed from the same layout numbers as the card, so the hover name stays
-			// the same apparent size on the lens and never lands on the anatomy.
-			const w = this.ui.panelW;
-			this.hoverLine = makeText({
-				fontSize: this.ui.feedText,
-				maxWidth: w * 0.92,
-				anchorX: 'center',
-				anchorY: 'bottom',
-				color: 0xffffff,
-			});
-			this.hoverLine.position.set(this.ui.panelX, this.ui.panelBottom - 0.022, this.ui.panelZ);
-			this.menuRig.add(this.hoverLine);
-			this.uiParts.push(this.hoverLine);
-			this.orientMenus();
-		}
-		this.hoverLine.text = msg;
-		this.hoverLine.sync();
 	}
 
 	/**
@@ -1947,6 +2040,10 @@ export class Lesson {
 		if (this.selGroup.visible) {
 			this.placeSelected();
 			this.selLabel.quaternion.copy(camQ);
+		}
+		if (this.hovGroup.visible && this.hovId) {
+			this.placePartLabel(this.hovId, this.hovGroup, this.hovLine);
+			this.hovLabel.quaternion.copy(camQ);
 		}
 
 		if (this.labelGroup.visible) this.updateLabels();
