@@ -67,6 +67,9 @@ export class AnatomyModel {
 				mesh,
 				spec,
 				home: mesh.position.clone(),
+				// Captured for every part up front rather than lazily on first grab: a reset has
+				// to be able to restore a pose it was never told was going to change.
+				homeQuat: mesh.quaternion.clone(),
 				centerLocal,
 				localOut: b.sub(a), // keeps the parent's scale; do not normalise
 				mat: mesh.material,
@@ -164,18 +167,33 @@ export class AnatomyModel {
 		const p = this.parts.get(id);
 		if (!p) return null;
 		p.held = true;
-		return p.mesh.getWorldPosition(new THREE.Vector3());
+		return {
+			pos: p.mesh.getWorldPosition(new THREE.Vector3()),
+			quat: p.mesh.getWorldQuaternion(new THREE.Quaternion()),
+		};
 	}
 
-	/** Drive a held part's origin to a world point. */
-	setGrabWorld(id, worldPos) {
+	/**
+	 * Drive a held part to a world pose. `worldQuat` is optional: translation-only grabs keep
+	 * the authored orientation, which matters because a rotated organ can be read as different
+	 * anatomy rather than the same part turned round.
+	 */
+	setGrabWorld(id, worldPos, worldQuat) {
 		const p = this.parts.get(id);
 		if (!p || !p.held) return false;
 		// Convert through the mesh's OWN parent, not the model group: quantized glTF puts scale
 		// on ancestor nodes, so the group is not necessarily the direct parent.
-		const local = p.mesh.parent.worldToLocal(worldPos.clone());
+		const parent = p.mesh.parent;
+		const local = parent.worldToLocal(worldPos.clone());
 		p.mesh.position.copy(local);
 		p.moved = local.clone().sub(this.basePos(p, new THREE.Vector3()));
+		if (worldQuat) {
+			// World orientation back into the parent's space, or an ancestor's own rotation
+			// would be applied twice.
+			const inv = parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+			p.mesh.quaternion.copy(inv.multiply(worldQuat));
+			p.turned = true;
+		}
 		return true;
 	}
 
@@ -186,22 +204,33 @@ export class AnatomyModel {
 		return true;
 	}
 
-	/** Ids the student has displaced by hand. */
+	/** Ids the student has displaced or turned by hand. */
 	movedIds() {
-		return [...this.parts].filter(([, p]) => p.moved).map(([id]) => id);
+		return [...this.parts].filter(([, p]) => p.moved || p.turned).map(([id]) => id);
 	}
 
-	/** Send every displaced part back to where the lesson wants it. */
+	/**
+	 * Send every part back to its authored pose.
+	 *
+	 * Written to be unconditional rather than to undo the specific things it knows about. The
+	 * flags (`moved`, `turned`, `held`) are an optimisation for apply(), not a trustworthy
+	 * record of what a student managed to disturb, and a reset between two students has to be
+	 * exact whether or not the bookkeeping kept up. Clearing and restoring every part costs
+	 * one pass over 14 objects.
+	 */
 	returnMoved() {
 		let n = 0;
 		for (const p of this.parts.values()) {
-			if (p.moved) {
-				p.moved = null;
-				n += 1;
-			}
+			if (p.moved || p.turned || p.held) n += 1;
+			p.moved = null;
+			p.turned = false;
 			p.held = false;
+			// Rotation is restored for every part, not just flagged ones: centerLocal, the hit
+			// aids and the leader-line anchors are all measured in mesh space on the assumption
+			// that a part's orientation is the authored one.
+			if (p.homeQuat) p.mesh.quaternion.copy(p.homeQuat);
 		}
-		if (n) this.apply();
+		this.apply();
 		return n;
 	}
 

@@ -33,6 +33,9 @@ let status;
 let hud;
 let tuner;
 let ready = false;
+// Per-hand: did the other trigger go down during this hold? If so the release is part of a
+// grab gesture, not a tap.
+const triggerGesture = { right: false, left: false };
 // Defect #3: the lesson UI is planned around an authored 1.45 m eye height. Measure the
 // student's real one from the headset instead. Samples are collected over the first XR
 // frames and reduced with a MEDIAN, because head pose on session entry is noisy (the
@@ -75,6 +78,8 @@ async function boot() {
 	if (DEBUG || TUNE) {
 		window.__lesson = lesson;
 		window.__anatomy = model;
+		// Exposes the live controllers map so input gestures can be driven in a test.
+		window.__globals = g;
 		window.__scene = g.scene;
 		window.__renderer = g.renderer;
 	}
@@ -157,6 +162,23 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 	}
 }
 
+/** What a trigger TAP does, once it is known not to be half of a grab gesture. */
+function triggerAction(controllers) {
+	if (lesson.pressVideo()) return; // a clip is up and owns the trigger (F2)
+	if (lesson.done) {
+		lesson.reset();
+		return;
+	}
+	if (lesson.pickButton(controllers)) {
+		lesson.next();
+		return;
+	}
+	if (lesson.pressNav()) return; // Back or Full Reset (F5)
+	if (lesson.pressQuiz()) return; // a quiz choice plate (defect #1)
+	if (lesson.pressCallout()) return; // a callout dot (F1)
+	lesson.select(lesson.hover);
+}
+
 function onFrame(delta, _time, globals) {
 	if (!ready) return;
 	const controllers = globals.controllers;
@@ -185,30 +207,40 @@ function onFrame(delta, _time, globals) {
 		if (Math.abs(sy) > 0.18) lesson.adjustSpread(-sy * delta * 0.9);
 	}
 
-	// F4: squeeze grabs and moves a part; the trigger keeps its 'select / advance' meaning.
-	// Both hands are polled so either controller can grab, and a release is matched to the
-	// hand that started it - otherwise letting go with the idle hand would drop the part.
-	for (const hand of ['right', 'left']) {
-		const c = controllers[hand];
-		if (!c?.gamepad) continue;
-		if (c.gamepad.getButtonDown?.(XR_BUTTONS.SQUEEZE)) lesson.grabStart(hand, controllers);
-		if (c.gamepad.getButtonUp?.(XR_BUTTONS.SQUEEZE)) lesson.grabEnd(hand);
+	// Grab is BOTH triggers held together. That gesture cannot be mistaken for a select, but
+	// it does mean a select can no longer fire on trigger PRESS: the first of the two presses
+	// would act before the second arrived, naming a part every time a student went to grab
+	// one. So a select fires on RELEASE, and only if the other trigger stayed up for the
+	// whole hold - which is what distinguishes a tap from half of a grab gesture.
+	const held = {
+		right: !!controllers.right?.gamepad?.getButton?.(XR_BUTTONS.TRIGGER),
+		left: !!controllers.left?.gamepad?.getButton?.(XR_BUTTONS.TRIGGER),
+	};
+	const bothTriggers = held.right && held.left;
+	if (bothTriggers && !lesson.grab) {
+		// The aiming hand drives: hover is picked from the same controller Lesson.update uses.
+		lesson.grabStart(controllers.right ? 'right' : 'left', controllers, 'triggers');
 	}
+	// Letting go of either trigger ends a TRIGGER grab. Scoped by gesture so it cannot also
+	// cancel a squeeze grab, which is held with no triggers down at all.
+	if (lesson.grab?.via === 'triggers' && !bothTriggers) lesson.grabEnd(undefined, 'triggers');
 
-	const ct = controllers.right || controllers.left;
-	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
-		if (lesson.pressVideo()) {
-			// consumed: a clip is up and owns the trigger (F2)
-		} else if (lesson.done) lesson.reset();
-		else if (lesson.pickButton(controllers)) lesson.next();
-		else if (lesson.pressNav()) {
-			// consumed: Back or Full Reset was under the ray (F5)
+	for (const hand of ['right', 'left']) {
+		const gp = controllers[hand]?.gamepad;
+		if (!gp) continue;
+		const other = hand === 'right' ? 'left' : 'right';
+		// Squeeze still grabs one-handed. It costs nothing to keep and is quicker once known.
+		if (gp.getButtonDown?.(XR_BUTTONS.SQUEEZE)) lesson.grabStart(hand, controllers, 'squeeze');
+		if (gp.getButtonUp?.(XR_BUTTONS.SQUEEZE)) lesson.grabEnd(hand, 'squeeze');
+
+		if (gp.getButtonDown?.(XR_BUTTONS.TRIGGER)) triggerGesture[hand] = held[other];
+		// Mark BOTH hands the moment the gesture completes, so neither release acts as a tap.
+		if (bothTriggers) triggerGesture[hand] = true;
+		if (gp.getButtonUp?.(XR_BUTTONS.TRIGGER)) {
+			const wasGesture = triggerGesture[hand];
+			triggerGesture[hand] = false;
+			if (!wasGesture && !lesson.grab) triggerAction(controllers);
 		}
-		else if (lesson.pressQuiz()) {
-			// consumed: a quiz choice plate was under the ray (defect #1)
-		} else if (lesson.pressCallout()) {
-			// consumed: a callout dot was under the ray (F1)
-		} else lesson.select(lesson.hover);
 	}
 
 	if (hud) {

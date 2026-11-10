@@ -590,27 +590,44 @@ export class Lesson {
 	 * Deliberately refused during a clip or the quiz. Both cover the anatomy, so a grab there
 	 * would silently rearrange a model the student cannot see and cannot put back.
 	 */
-	grabStart(hand, controllers) {
+	grabStart(hand, controllers, via = 'triggers') {
 		if (this.grab) return false;
 		if (this.video.isOpen || this.quiz) return false;
 		const id = this.hover;
 		if (!id) return false;
 		const ct = controllers?.[hand];
 		if (!ct?.gripSpace) return false;
-		const partWorld = this.model.beginGrab(id);
-		if (!partWorld) return false;
+		const start = this.model.beginGrab(id);
+		if (!start) return false;
 		const handWorld = ct.gripSpace.getWorldPosition(new THREE.Vector3());
-		// Offset from hand to part, so the part moves WITH the hand from where it already was.
-		this.grab = { id, hand, offset: partWorld.sub(handWorld) };
+		const handQuat = ct.gripSpace.getWorldQuaternion(new THREE.Quaternion());
+		// Record the hand's pose at grab time and the part's pose relative to it. Everything
+		// afterwards is expressed as the DELTA from this, so the part neither jumps on grab nor
+		// inherits whatever absolute angle the controller happened to be at.
+		this.grab = {
+			id,
+			hand,
+			// Which gesture opened this grab. The release rules differ, and without this a
+			// squeeze-held part was dropped a frame later by the both-triggers release check.
+			via,
+			offset: start.pos.clone().sub(handWorld),
+			handQuat0: handQuat.clone(),
+			handQuat0Inv: handQuat.clone().invert(),
+			partQuat0: start.quat.clone(),
+		};
 		this.model.highlight(id, true);
 		this.fire('grab-start', id);
 		return true;
 	}
 
-	/** Squeeze released. Ignores the other hand's release so two-handed use cannot drop early. */
-	grabEnd(hand) {
+	/**
+	 * End a grab. A release only counts if it comes from the hand that started it AND from the
+	 * same gesture, so letting go of a squeeze cannot cancel a trigger grab or vice versa.
+	 */
+	grabEnd(hand, via) {
 		if (!this.grab) return false;
 		if (hand && this.grab.hand !== hand) return false;
+		if (via && this.grab.via !== via) return false;
 		const id = this.grab.id;
 		this.model.endGrab(id);
 		this.model.highlight(id, false);
@@ -629,8 +646,17 @@ export class Lesson {
 			this.grabEnd();
 			return;
 		}
-		const handWorld = ct.gripSpace.getWorldPosition(this.t);
-		this.model.setGrabWorld(this.grab.id, handWorld.clone().add(this.grab.offset));
+		const g = this.grab;
+		const handWorld = ct.gripSpace.getWorldPosition(this.t).clone();
+		const handQuat = ct.gripSpace.getWorldQuaternion(new THREE.Quaternion());
+		// How far the wrist has turned since the grab began.
+		const delta = handQuat.clone().multiply(g.handQuat0Inv);
+		// The part orbits the hand rather than spinning in place: the offset is rotated by the
+		// same delta, so turning the wrist swings the part around the hand the way a held
+		// object behaves, instead of pivoting about its own origin while hanging in mid-air.
+		const pos = handWorld.add(g.offset.clone().applyQuaternion(delta));
+		const quat = delta.clone().multiply(g.partQuat0);
+		this.model.setGrabWorld(g.id, pos, quat);
 	}
 
 	/**
