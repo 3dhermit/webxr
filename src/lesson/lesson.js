@@ -27,6 +27,16 @@ export class Lesson {
 		this.i = -1;
 		this.tweens = [];
 		this.root = new THREE.Group();
+		// Every menu (cards, buttons, quiz plates, status box) lives in this rig. The rig
+		// TRANSLATES with the head so the menus keep the same distance and offset however the
+		// student leans or shifts in the seat, but it never ROTATES with the head: menus are
+		// oriented once, upright, to face the seated eye. They used to copy the camera's
+		// rotation every frame, so every nod, tilt and glance swivelled the whole interface.
+		// The anatomy and everything anchored to it stays fixed in the room.
+		this.menuRig = new THREE.Group();
+		this.root.add(this.menuRig);
+		this.menuFollowPerSec = data.runtime?.menuFollowPerSec ?? 12;
+		this.menuFollowMaxMetres = data.runtime?.menuFollowMaxMetres ?? 0.35;
 		this.labelGroup = new THREE.Group();
 		// Leader lines stay outside the billboarded label groups: a line rotated with the camera
 		// would detach from the part it points at.
@@ -281,7 +291,7 @@ export class Lesson {
 		// Plate is deliberately taller than the old 0.26 ratio: the label is long, and auto-fit
 		// would otherwise shrink it to stay on one line inside a very shallow plate.
 		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.34 });
-		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn);
+		this.menuRig.add(this.prompt.group, this.feedback.group, this.continueBtn);
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
@@ -291,7 +301,9 @@ export class Lesson {
 		this.calloutPanel.group.visible = false;
 		this.calloutLine = makeLeaderLine();
 		this.calloutLine.visible = false;
-		this.root.add(this.calloutPanel.group, this.calloutLine);
+		// The card is a menu; its leader line stays in room space because it ends on the anatomy.
+		this.menuRig.add(this.calloutPanel.group);
+		this.root.add(this.calloutLine);
 
 		// Defect #2: correctness was signalled by COLOUR ALONE — a green card for right, a red
 		// card for wrong. With red-green colour vision deficiency at ~8% in boys, one or two
@@ -323,7 +335,7 @@ export class Lesson {
 		this.badge.add(okMark, badMark);
 		this.badge.userData = { ok: okMark, bad: badMark };
 		this.badge.visible = false;
-		this.root.add(this.badge);
+		this.menuRig.add(this.badge);
 
 		// Defect #1: heart.json authors four cited quiz questions and NOTHING read them -
 		// `npm run validate` even counted them ("quiz 4"), so the gate reported healthy content
@@ -351,7 +363,7 @@ export class Lesson {
 			edge: '#ffc489',
 		});
 		this.navBtns = { back: this.backBtn, reset: this.resetBtn };
-		this.root.add(this.backBtn, this.resetBtn);
+		this.menuRig.add(this.backBtn, this.resetBtn);
 		this.navHover = null;
 		this.resetArmed = 0;
 
@@ -366,7 +378,7 @@ export class Lesson {
 			this.quizGroup.add(plate);
 		}
 		this.quizGroup.visible = false;
-		this.root.add(this.quizGroup);
+		this.menuRig.add(this.quizGroup);
 		this.quiz = null;
 
 		// Status box for the three assessed tasks (trace, find-and-name, multiple choice):
@@ -374,11 +386,10 @@ export class Lesson {
 		this.quizStatus = new Panel({ width: this.ui.panelW, fontSize: this.ui.feedText });
 		this.quizStatus.onfit = () => this.relayout();
 		this.quizStatus.group.visible = false;
-		this.root.add(this.quizStatus.group);
+		this.menuRig.add(this.quizStatus.group);
 
 		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge, this.backBtn, this.resetBtn, this.quizStatus.group];
 		this.applyUiLayout();
-		for (const head of this.uiParts) head.lookAt(0, this.ui.eyeY, 0);
 	}
 
 	/**
@@ -402,7 +413,7 @@ export class Lesson {
 			this.quizStatus?.group,
 		].filter(Boolean);
 		for (const o of old) {
-			this.root.remove(o);
+			o.parent?.remove(o);
 			o.traverse?.((c) => {
 				c.geometry?.dispose?.();
 				c.material?.dispose?.();
@@ -428,6 +439,7 @@ export class Lesson {
 		if (this.hoverLine) this.hoverLine.position.set(panelX, panelBottom - 0.022, panelZ);
 		this.placeCalloutPanel();
 		if (this.quizPlates?.length) this.placeQuiz();
+		this.orientMenus();
 		if (this.backBtn) {
 			this.backBtn.position.set(this.ui.navX, this.ui.navTopY, this.ui.panelZ);
 			this.resetBtn.position.set(this.ui.navX, this.ui.navTopY - this.ui.navGap, this.ui.panelZ);
@@ -834,17 +846,90 @@ export class Lesson {
 	 * does not use, measured from the same angular spec as everything else.
 	 */
 	placeQuiz() {
+		const g = this.quizGrid();
 		const qh = this.ui.feedText * this.quizPlateMul;
-		const pitch = qh * this.quizPitchMul;
-		const top = this.ui.eyeY + this.ui.panelZ * Math.tan(THREE.MathUtils.degToRad(-4));
-		// On the title card the Start plate sits directly under the card, on the card's side.
-		// In the answer column it sat ~73 degrees away from the text it starts, so a student
-		// read on one side and had to turn their head right across the view to begin.
 		const intro = this.quiz?.stage === 'intro';
+		let bottom = g.top;
 		this.quizPlates.forEach((pl, i) => {
-			if (intro && i === 0) pl.position.set(this.ui.panelX, this.ui.panelBottom - 0.014 - qh / 2, this.ui.panelZ);
-			else pl.position.set(this.ui.calloutX, top - i * pitch, this.ui.panelZ);
+			const plate = pl.userData.plate;
+			const base = plate.geometry.parameters;
+			const cap = pl.userData.caption;
+			if (intro) {
+				// Title card: one full-width Start plate directly under the card.
+				if (i !== 0) return;
+				plate.scale.set(1, 1, 1);
+				cap.maxWidth = base.width * 0.95;
+				pl.position.set(this.ui.panelX, g.top - qh / 2, this.ui.panelZ);
+				bottom = g.top - qh;
+				return;
+			}
+			// Answers: a 2x2 grid UNDER the question card, on the card's side, so a question and
+			// its answers are read in one place - the column used to sit ~73 degrees away on the
+			// far side of the heart. Columns run from the card's anatomy-side edge outward, so
+			// the grid never reaches across into the organ. Row heights come from the answers'
+			// own line counts (quizRowHeights): long answers wrap instead of being shrunk below
+			// a readable size.
+			const col = i % 2;
+			const row = Math.floor(i / 2);
+			const rowH = this.quizRowH?.[row] ?? qh;
+			const y = g.top - (row ? (this.quizRowH?.[0] ?? qh) + g.gap : 0) - rowH / 2;
+			const x = g.inner + g.side * (g.colW / 2 + col * (g.colW + g.gap));
+			plate.scale.set(g.colW / base.width, rowH / base.height, 1);
+			cap.maxWidth = g.colW * 0.9;
+			pl.position.set(x, y, this.ui.panelZ);
+			bottom = Math.min(bottom, y - rowH / 2);
 		});
+		this.placeContinueForQuiz(bottom);
+		this.orientMenus();
+	}
+
+	/** Geometry of the answer grid: anatomy-side edge, direction outward, column width. */
+	quizGrid() {
+		const side = Math.sign(this.ui.panelX) || 1;
+		const d = Math.abs(this.ui.panelZ);
+		const inner = this.ui.panelX - (side * this.ui.panelW) / 2;
+		const outer = side * d * Math.tan(THREE.MathUtils.degToRad(this.uiDeg.maxAz));
+		const gridW = Math.max(this.ui.panelW, Math.min(Math.abs(outer - inner), this.ui.panelW * 1.6));
+		const gap = this.ui.feedText * 0.5;
+		return { side, inner, gap, colW: (gridW - gap) / 2, top: this.ui.panelBottom - 0.014 };
+	}
+
+	/**
+	 * Row heights for the current question. The font is monospaced (Space Mono), so a
+	 * word-wrapped answer's line count is exact arithmetic - no waiting on troika's async
+	 * measurement, and every plate is sized before it is first drawn.
+	 */
+	quizRowHeights(choices) {
+		const fs = this.ui.feedText * 0.92;
+		// Measured advance 0.63 em + 0.02 em letter spacing, rounded up so the estimate can only
+		// over-count lines (a slightly tall plate), never under-count (text spilling out).
+		const perLine = Math.max(4, Math.floor((this.quizGrid().colW * 0.9) / (fs * 0.67)));
+		const lines = (s) => {
+			let n = 1;
+			let len = 0;
+			for (const w of String(s).split(/\s+/).filter(Boolean)) {
+				const add = len ? w.length + 1 : w.length;
+				if (len && len + add > perLine) {
+					n += 1 + Math.floor((w.length - 1) / perLine);
+					len = w.length % perLine || perLine;
+				} else {
+					n += len ? 0 : Math.floor((w.length - 1) / perLine);
+					len += add;
+				}
+			}
+			return n;
+		};
+		const h = (s) => lines(s) * fs * 1.25 + fs * 1.1;
+		const minH = this.ui.feedText * this.quizPlateMul;
+		return [0, 1].map((r) => Math.max(minH, h(choices[r * 2] ?? ''), h(choices[r * 2 + 1] ?? '')));
+	}
+
+	/** Continue sits below whatever the quiz is showing, and goes home afterwards. */
+	placeContinueForQuiz(bottom) {
+		const ch = this.continueBtn.userData.height ?? 0.04;
+		const showing = this.quiz && this.quiz.stage !== 'results';
+		const y = showing ? Math.min(this.ui.btnY, bottom - this.ui.feedText * 0.6 - ch / 2) : this.ui.btnY;
+		this.continueBtn.position.set(this.ui.btnX, y, this.ui.panelZ);
 	}
 
 	/** Start the quiz: question order as authored, CHOICES shuffled (see shuffleChoices). */
@@ -913,6 +998,8 @@ export class Lesson {
 			[idx[k], idx[j]] = [idx[j], idx[k]];
 		}
 		this.quiz.order = idx;
+		this.quizRowH = this.quizRowHeights(idx.map((k) => q.choices[k]));
+		this.placeQuiz();
 		this.prompt.set(`Question ${i + 1} of ${this.quiz.total}\n\n${q.q}`);
 		this.quizPlates.forEach((pl, k) => {
 			const has = k < idx.length;
@@ -1012,6 +1099,7 @@ export class Lesson {
 		const { score, total } = this.quiz;
 		this.quiz.stage = 'results';
 		this.quizPlates.forEach((pl) => (pl.visible = false));
+		this.placeContinueForQuiz(this.ui.btnY);
 		this.quizHover = null;
 		const note =
 			score === total
@@ -1169,6 +1257,9 @@ export class Lesson {
 		this.refreshCallouts();
 		// Started last on purpose: showQuestion() writes the question onto the prompt card, so
 		// it has to run after the generic step card above or the question never appears.
+		// Continue goes home on every step change; the quiz lowers it again if it needs to.
+		// (Back or Full Reset mid-quiz would otherwise leave it parked under a grid that is gone.)
+		this.placeContinueForQuiz(this.ui.btnY);
 		if (a.quiz) this.enterQuiz();
 		this.setQuizStatus('active'); // hides itself on steps that are not assessed
 		this.fire('step', st.id);
@@ -1310,6 +1401,33 @@ export class Lesson {
 			qs.group.position.set(this.ui.panelX, promptTop + 0.012 + h - qs.padding, this.ui.panelZ);
 		}
 		this.panelBottomY = b;
+	}
+
+	/**
+	 * Turn each menu to face the seated eye, upright. Done when the layout changes, not per
+	 * frame. The rig only ever translates, so an orientation computed against the rig's
+	 * design eye stays correct as the rig follows the head.
+	 */
+	orientMenus() {
+		this.menuRig.updateMatrixWorld(true);
+		const eye = this.menuRig.localToWorld(new THREE.Vector3(0, this.ui.eyeY, 0));
+		for (const m of this.uiParts || []) m?.lookAt(eye);
+		for (const pl of this.quizPlates || []) pl.lookAt(eye);
+	}
+
+	/** Per-frame: carry the menus along with the head's POSITION (never its rotation). */
+	followMenus(dt) {
+		const head = this.camera.position; // camera and root share the player as parent
+		const target = this._menuTarget || (this._menuTarget = new THREE.Vector3());
+		target.set(head.x, head.y - this.ui.eyeY, head.z);
+		// Clamped so a student leaning right in to look at a part does not drive the cards
+		// through the heart; beyond the clamp they stay put and the student is simply closer.
+		if (target.length() > this.menuFollowMaxMetres) target.setLength(this.menuFollowMaxMetres);
+		// Light smoothing filters tracking jitter without feeling like a spring: at 12/s the
+		// rig is ~95% caught up within a quarter of a second.
+		const k = 1 - Math.exp(-this.menuFollowPerSec * Math.max(0, dt));
+		this.menuRig.position.lerp(target, k);
+		this.menuRig.updateMatrixWorld(true);
 	}
 
 	/** 1-based number of step `i` among the assessed tasks, or 0 if it is not one. */
@@ -1550,8 +1668,9 @@ export class Lesson {
 				color: 0xffffff,
 			});
 			this.hoverLine.position.set(this.ui.panelX, this.ui.panelBottom - 0.022, this.ui.panelZ);
-			this.root.add(this.hoverLine);
+			this.menuRig.add(this.hoverLine);
 			this.uiParts.push(this.hoverLine);
+			this.orientMenus();
 		}
 		this.hoverLine.text = msg;
 		this.hoverLine.sync();
@@ -1719,10 +1838,10 @@ export class Lesson {
 		this.tweens = this.tweens.filter((tw) => tw.t < tw.dur);
 		this.model.stepHoming(dt);
 
+		// Still used by labels anchored ON the anatomy, which keep turning to face the reader.
 		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
-		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed
-		// tilt made it read edge-on at the edge of the Quest field of view.
-		for (const head of this.uiParts) head.quaternion.copy(camQ);
+		// Menus: follow the head's position, keep their own orientation (see menuRig).
+		this.followMenus(dt);
 
 		this.video.update(dt);
 		// Let a primed Full Reset lapse on its own.
