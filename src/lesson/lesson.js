@@ -369,7 +369,14 @@ export class Lesson {
 		this.root.add(this.quizGroup);
 		this.quiz = null;
 
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge, this.backBtn, this.resetBtn];
+		// Status box for the three assessed tasks (trace, find-and-name, multiple choice):
+		// which quiz this is, and whether it is done. Sits directly above the step card.
+		this.quizStatus = new Panel({ width: this.ui.panelW, fontSize: this.ui.feedText });
+		this.quizStatus.onfit = () => this.relayout();
+		this.quizStatus.group.visible = false;
+		this.root.add(this.quizStatus.group);
+
+		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.calloutPanel.group, this.badge, this.backBtn, this.resetBtn, this.quizStatus.group];
 		this.applyUiLayout();
 		for (const head of this.uiParts) head.lookAt(0, this.ui.eyeY, 0);
 	}
@@ -392,6 +399,7 @@ export class Lesson {
 			this.backBtn,
 			this.resetBtn,
 			this.hoverLine,
+			this.quizStatus?.group,
 		].filter(Boolean);
 		for (const o of old) {
 			this.root.remove(o);
@@ -611,6 +619,7 @@ export class Lesson {
 			this.hoverLine,
 			this.selGroup,
 			this.selLine,
+			this.quizStatus?.group,
 		].filter(Boolean);
 	}
 
@@ -828,8 +837,13 @@ export class Lesson {
 		const qh = this.ui.feedText * this.quizPlateMul;
 		const pitch = qh * this.quizPitchMul;
 		const top = this.ui.eyeY + this.ui.panelZ * Math.tan(THREE.MathUtils.degToRad(-4));
+		// On the title card the Start plate sits directly under the card, on the card's side.
+		// In the answer column it sat ~73 degrees away from the text it starts, so a student
+		// read on one side and had to turn their head right across the view to begin.
+		const intro = this.quiz?.stage === 'intro';
 		this.quizPlates.forEach((pl, i) => {
-			pl.position.set(this.ui.calloutX, top - i * pitch, this.ui.panelZ);
+			if (intro && i === 0) pl.position.set(this.ui.panelX, this.ui.panelBottom - 0.014 - qh / 2, this.ui.panelZ);
+			else pl.position.set(this.ui.calloutX, top - i * pitch, this.ui.panelZ);
 		});
 	}
 
@@ -848,7 +862,7 @@ export class Lesson {
 	 * "Question 1 of 4" with the answer plates already live, so a student still reading
 	 * the step text could fire a trigger at a plate and answer before seeing the question.
 	 * The card says what is coming and that nothing is recorded, and waits for an explicit
-	 * Start - on the plate where the answers will appear, or on Continue.
+	 * Start - on the plate under the card, or on Continue.
 	 */
 	showQuizTitle() {
 		const st = this.steps[this.i];
@@ -877,6 +891,7 @@ export class Lesson {
 		if (!this.quiz || this.quiz.stage !== 'intro') return false;
 		this.quiz.stage = 'questions';
 		this.quizHover = null;
+		this.placeQuiz(); // Start plate goes back into the answer column
 		this.showQuestion(0);
 		this.fire('quiz-start');
 		return true;
@@ -1005,6 +1020,7 @@ export class Lesson {
 					? 'Good. The reasons you just read are the part worth keeping.'
 					: 'Worth another pass: go Back to any step and look again.';
 		this.prompt.set(`QUIZ COMPLETE\n\nYou answered ${score} of ${total} correctly.\n\n${note}\n\nThis score is not saved.`);
+		this.setQuizStatus('done');
 		this.clearSay();
 		this.setContinueEnabled(true);
 		this.relayout();
@@ -1154,6 +1170,7 @@ export class Lesson {
 		// Started last on purpose: showQuestion() writes the question onto the prompt card, so
 		// it has to run after the generic step card above or the question never appears.
 		if (a.quiz) this.enterQuiz();
+		this.setQuizStatus('active'); // hides itself on steps that are not assessed
 		this.fire('step', st.id);
 		return st;
 	}
@@ -1206,6 +1223,8 @@ export class Lesson {
 			// and make the claim in the message true.
 			this.tweenFactor(0, 2.0);
 			this.setContinueEnabled(true);
+			this.setQuizStatus('done');
+			this.fire('find-complete');
 			return null;
 		}
 		this.find.asked = this.find.queue[0];
@@ -1282,7 +1301,58 @@ export class Lesson {
 			// is up, so it must respect the video mask or the badge pops back through the panel.
 			this.badge.visible = !this._maskBackup && fh > 0 && !!this.badgeKind;
 		}
+		if (this.quizStatus?.group.visible) {
+			// A Panel's text origin sits `padding` below its top edge and it grows downward, so
+			// the box's bottom edge is placed a small gap above the prompt card's top edge.
+			const promptTop = this.prompt.group.position.y + this.prompt.padding;
+			const qs = this.quizStatus;
+			const h = qs.height || 0.04;
+			qs.group.position.set(this.ui.panelX, promptTop + 0.012 + h - qs.padding, this.ui.panelZ);
+		}
 		this.panelBottomY = b;
+	}
+
+	/** 1-based number of step `i` among the assessed tasks, or 0 if it is not one. */
+	quizNumberFor(i) {
+		let n = 0;
+		for (let k = 0; k < this.steps.length; k++) {
+			const a = this.steps[k].action || {};
+			if (a.flow || a.reassemble || a.quiz) {
+				n += 1;
+				if (k === i) return n;
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * Show, update or hide the quiz status box. `state` is 'off', 'active' or 'done'.
+	 * Numbered automatically from the lesson's assessed steps (flow, reassemble, quiz), so
+	 * adding or reordering steps in the JSON keeps Quiz 1/2/3 correct with no code change.
+	 * The words change as well as the colour, so completion never relies on colour alone.
+	 */
+	setQuizStatus(state) {
+		const qs = this.quizStatus;
+		if (!qs) return;
+		const n = state === 'off' ? 0 : this.quizNumberFor(this.i);
+		if (!n) {
+			qs.group.visible = false;
+			this.quizStatusState = 'off';
+			return;
+		}
+		const total = this.steps.filter((s) => {
+			const sa = s.action || {};
+			return sa.flow || sa.reassemble || sa.quiz;
+		}).length;
+		const a = this.steps[this.i].action || {};
+		const kind = a.flow ? 'Trace the path' : a.reassemble ? 'Find and name' : 'Multiple choice';
+		const done = state === 'done';
+		qs.set(`QUIZ ${n} of ${total}  —  ${kind}\n${done ? 'COMPLETED' : 'In progress'}`, done ? 0xffffff : 0xffd98a);
+		qs.back.material.color.setHex(done ? 0x1f6b3a : 0x4a3410);
+		qs.back.material.opacity = 0.92;
+		qs.group.visible = !this._maskBackup;
+		this.quizStatusState = done ? 'done' : 'active';
+		this.relayout();
 	}
 
 	setContinueEnabled(on) {
@@ -1319,6 +1389,7 @@ export class Lesson {
 
 	finish() {
 		this.done = true;
+		this.setQuizStatus('off');
 		this.refreshCallouts();
 		this.labelGroup.visible = false;
 		this.waypointGroup.visible = false;
@@ -1531,6 +1602,7 @@ export class Lesson {
 				if (this.flow.i >= want.length) {
 					this.say(`Complete. And remember: the vessel that leaves for the lungs carries LOW-oxygen blood.`, OK);
 					this.setContinueEnabled(true);
+					this.setQuizStatus('done');
 					this.fire('flow-complete');
 				}
 				return 'ok';
