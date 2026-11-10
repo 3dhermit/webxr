@@ -28,6 +28,15 @@ export class VideoScreen {
 		// How fast the panel catches up to the gaze, and how far it may drift before it tries.
 		this.follow = runtime.videoFollowPerSec ?? 3.4;
 		this.deadZoneDeg = runtime.videoDeadZoneDeg ?? 6;
+		// World-locked by default: the screen is placed where the student is looking when it
+		// opens and then stays put in the room, like a real screen. Head-follow (true) keeps
+		// the old lazy-follow behaviour for anyone who wants it back.
+		this.followHead = runtime.videoFollow ?? false;
+		// How far above or below eye level a world-locked screen may be placed. A clip is
+		// usually opened while looking DOWN at a callout on the heart; placed straight along
+		// that gaze it would sit low and tilted for its whole run.
+		this.maxPitchDeg = runtime.videoMaxPitchDeg ?? 12;
+		this._m = new THREE.Matrix4();
 
 		this.id = null;
 		this.el = null;
@@ -173,8 +182,10 @@ export class VideoScreen {
 		this.layout();
 		this.group.visible = true;
 		// Snap to the current gaze on open instead of easing in from wherever the last clip
-		// was closed, which would fly the panel across the student's view.
-		this.reposition(1);
+		// was closed, which would fly the panel across the student's view. Each open re-centres
+		// a world-locked screen, which is also how a student gets it back after turning away.
+		if (this.followHead) this.reposition(1);
+		else this.placeOnce();
 		this.playWithFallback();
 		return true;
 	}
@@ -266,6 +277,30 @@ export class VideoScreen {
 		this.screenH = h;
 	}
 
+	/**
+	 * Place a world-locked screen in front of the student, upright, facing them.
+	 *
+	 * Keeps the gaze HEADING but clamps its elevation, and orients the panel by looking back
+	 * at the eye with world up, so it never inherits head roll. Camera and this group share a
+	 * parent, so local positions are the right space.
+	 */
+	placeOnce() {
+		const cam = this.camera;
+		const camPos = this._v.copy(cam.position);
+		const fwd = this._fwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+		const flat = Math.hypot(fwd.x, fwd.z);
+		const hx = flat > 1e-4 ? fwd.x / flat : 0;
+		const hz = flat > 1e-4 ? fwd.z / flat : -1;
+		const lim = THREE.MathUtils.degToRad(this.maxPitchDeg);
+		const elev = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1)), -lim, lim);
+		const dir = this._target.set(hx * Math.cos(elev), Math.sin(elev), hz * Math.cos(elev));
+		this.group.position.copy(camPos).addScaledVector(dir, this.dist);
+		// Matrix4.lookAt(eye, target): z axis = eye - target, so the panel's +Z (its face)
+		// points back at the student.
+		this._m.lookAt(camPos, this.group.position, THREE.Object3D.DEFAULT_UP);
+		this.group.quaternion.setFromRotationMatrix(this._m);
+	}
+
 	/** Ease the panel toward the gaze. `force` of 1 snaps it there immediately. */
 	reposition(force = 0) {
 		const cam = this.camera;
@@ -297,7 +332,7 @@ export class VideoScreen {
 		if (this.el?.videoWidth && Math.abs(this.screen.scale.x / this.screen.scale.y - this.el.videoWidth / this.el.videoHeight) > 0.01) {
 			this.layout();
 		}
-		this.reposition(dt);
+		if (this.followHead) this.reposition(dt);
 		const d = this.el?.duration;
 		const u = Number.isFinite(d) && d > 0 ? this.el.currentTime / d : 0;
 		this.bar.scale.x = u * this.screenW;

@@ -836,11 +836,50 @@ export class Lesson {
 	/** Start the quiz: question order as authored, CHOICES shuffled (see shuffleChoices). */
 	enterQuiz() {
 		const qs = this.data.quiz || [];
-		this.quiz = { i: 0, score: 0, answered: false, total: qs.length, order: null };
+		this.quiz = { i: 0, score: 0, answered: false, total: qs.length, order: null, stage: 'intro' };
 		this.quizGroup.visible = qs.length > 0;
 		this.placeQuiz();
-		if (qs.length) this.showQuestion(0);
+		if (qs.length) this.showQuizTitle();
 		return qs.length;
+	}
+
+	/**
+	 * The quiz's title card. Without it the step went straight from the step card to
+	 * "Question 1 of 4" with the answer plates already live, so a student still reading
+	 * the step text could fire a trigger at a plate and answer before seeing the question.
+	 * The card says what is coming and that nothing is recorded, and waits for an explicit
+	 * Start - on the plate where the answers will appear, or on Continue.
+	 */
+	showQuizTitle() {
+		const st = this.steps[this.i];
+		const n = this.quiz.total;
+		const mins = st?.minutes ? ` · about ${st.minutes} min` : '';
+		this.prompt.set(
+			`QUIZ\n\n${st?.title ?? 'Check your understanding'}\n\n` +
+				`${n} question${n === 1 ? '' : 's'}${mins}\n\n` +
+				`${this.textOf(st?.prompt) || 'Point at an answer and pull the trigger.'} ` +
+				`The reason is shown after every answer. Your score is shown only to you and is not saved.`,
+		);
+		this.quizPlates.forEach((pl, k) => {
+			pl.visible = k === 0;
+			if (k !== 0) return;
+			pl.userData.caption.text = 'Start quiz';
+			pl.userData.caption.sync();
+			this.setPlate(pl, 'idle');
+		});
+		this.clearSay();
+		this.setContinueEnabled(true);
+		this.relayout();
+	}
+
+	/** Leave the title card and present the first question. */
+	startQuiz() {
+		if (!this.quiz || this.quiz.stage !== 'intro') return false;
+		this.quiz.stage = 'questions';
+		this.quizHover = null;
+		this.showQuestion(0);
+		this.fire('quiz-start');
+		return true;
 	}
 
 	/**
@@ -906,6 +945,7 @@ export class Lesson {
 	/** Trigger on a choice. Returns true when the press was consumed. */
 	pressQuiz() {
 		if (!this.quiz || this.quizHover == null) return false;
+		if (this.quiz.stage === 'intro') return this.startQuiz();
 		if (this.quiz.answered) return true; // already scored; Continue moves on
 		const q = this.data.quiz[this.quiz.i];
 		const picked = this.quiz.order[this.quizHover];
@@ -929,18 +969,46 @@ export class Lesson {
 	/** Continue pressed during the quiz: next question, or wrap up. Returns true if handled. */
 	nextQuestion() {
 		if (!this.quiz) return false;
+		if (this.quiz.stage === 'intro') return this.startQuiz();
+		if (this.quiz.stage === 'results') {
+			// Second Continue on the results card: leave the quiz and let the lesson finish.
+			this.quizGroup.visible = false;
+			this.quizHover = null;
+			this.quiz = null;
+			return false; // let the caller fall through to finish()
+		}
 		if (!this.quiz.answered) return true; // must answer before advancing
 		if (this.quiz.i < this.quiz.total - 1) {
 			this.showQuestion(this.quiz.i + 1);
 			return true;
 		}
-		// Score is spoken once and never stored - the classroom rule is no records.
-		const line = `${this.quiz.score} of ${this.quiz.total} correct.`;
-		this.quizGroup.visible = false;
+		this.showQuizResults();
+		return true;
+	}
+
+	/**
+	 * The quiz's closing card, held until Continue.
+	 *
+	 * The score used to be written to the feedback line and then handed straight to finish()
+	 * in the same frame, which overwrote it - so no student ever saw their result. It now
+	 * gets a card of its own. Shown once and never stored: the classroom rule is no records.
+	 */
+	showQuizResults() {
+		const { score, total } = this.quiz;
+		this.quiz.stage = 'results';
+		this.quizPlates.forEach((pl) => (pl.visible = false));
 		this.quizHover = null;
-		this.quiz = null;
-		this.say(`You answered ${line}`, MUTED);
-		return false; // let the caller fall through to finish()
+		const note =
+			score === total
+				? 'Every one right.'
+				: score >= Math.ceil(total / 2)
+					? 'Good. The reasons you just read are the part worth keeping.'
+					: 'Worth another pass: go Back to any step and look again.';
+		this.prompt.set(`QUIZ COMPLETE\n\nYou answered ${score} of ${total} correctly.\n\n${note}\n\nThis score is not saved.`);
+		this.clearSay();
+		this.setContinueEnabled(true);
+		this.relayout();
+		this.fire('quiz-done');
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
