@@ -54,3 +54,21 @@ explode deterministically instead of hoping an animation frame lands.
 `src/assets` into `dist`, so keeping the uncompressed 4 MB source there ships 4 MB to the
 headset. Only the optimised GLB, the registry and the attribution notice belong in
 `src/assets/anatomy` (measured shipped payload: 656 KB).
+
+## Textured model from Substance 3D Painter
+
+Painter's glTF export cannot be loaded as-is: it wraps every mesh in a same-named group
+(three.js then renames the mesh `<name>_1`, and parts.json matches 0 of 14 parts) and it
+drops the per-part `extras`. Fix, then optimise:
+
+```bash
+node tools/painter-glb-fix.mjs <painter-export.glb> assets-source/heart-male.glb fixed.glb
+npx @gltf-transform/cli@4 optimize fixed.glb src/assets/anatomy/heart-male-textured.opt.glb \
+  --compress meshopt --meshopt-level high --texture-compress webp --texture-size 1024 \
+  --flatten false --join false --instance false --palette false
+```
+
+Keep the four `false` flags: their defaults merge parts and destroy per-part identity.
+In Painter, keep the 14 mesh names, origins and transforms untouched, and use one texture
+set (glTF has no UDIMs). Which model loads is `runtime.modelUrl` in the lesson JSON;
+`runtime.modelColour` is `texture` (painted maps) or `system` (body-system tint on top).

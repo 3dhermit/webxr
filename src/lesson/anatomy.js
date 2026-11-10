@@ -23,7 +23,7 @@ export class AnatomyModel {
 		this.factor = 0;
 	}
 
-	static async load({ url, registry }) {
+	static async load({ url, registry, colour = 'texture' }) {
 		const loader = new GLTFLoader();
 		loader.setMeshoptDecoder(MeshoptDecoder);
 		const gltf = await loader.loadAsync(url);
@@ -43,13 +43,17 @@ export class AnatomyModel {
 		for (const mesh of meshes) {
 			const spec = byMeshName.get(mesh.name);
 			if (!spec) continue; // registry-driven: unknown meshes stay inert
+			// A model with painted PBR maps keeps them. The per-part colour and the flat 0.55
+			// roughness were written for the untextured reference mesh, where they are the ONLY
+			// surface information; on a textured model the colour multiplies over the base map
+			// and the roughness factor scales the roughness map, washing the painting out.
+			// `colour: 'system'` brings the body-system tint back on top of the texture, for when
+			// the colour code matters more than the painting.
+			const textured = !!mesh.material.map;
 			mesh.material = mesh.material.clone();
-			mesh.material.color.setHSL(
-				SYS_HUE[spec.system] + (i++ % 5) * 0.032,
-				0.6,
-				0.55,
-			);
-			mesh.material.roughness = 0.55;
+			if (!textured || colour === 'system')
+				mesh.material.color.setHSL(SYS_HUE[spec.system] + (i++ % 5) * 0.032, 0.6, textured ? 0.75 : 0.55);
+			if (!textured) mesh.material.roughness = 0.55;
 			mesh.material.transparent = true; // needed for ghosting; opacity stays 1
 			mesh.userData.partId = spec.id;
 

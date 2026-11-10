@@ -492,6 +492,8 @@
     "note": "Tunable by a teacher without touching code. Explode gain was measured in a browser run: gain 0.55 gave 14/14 draw calls with a 0.96 m exploded extent; gain 1.0 pushed parts out of the camera frustum (draw calls fell 14 -> 11).",
     "explodeGain": 0.45,
     "maxExtraSpread": 1.2,
+    "modelUrl": "assets/anatomy/heart-male-textured.opt.glb",
+    "modelColour": "texture",
     "hitSphereMinMetres": 0.025,
     "tablePlacement": {
       "modelScale": 2.4,

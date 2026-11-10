@@ -23,3 +23,18 @@
   and destroy per-part identity). Loading the .opt file needs a Meshopt decoder.
 - **Not for clinical use.** Reference geometry for teaching only; verify against an
   authoritative anatomical source before clinical or assessment use.
+
+## heart-male-textured.opt.glb (modified)
+
+- **Derived from** `heart-male.glb` above (HuBMAP Human Reference Atlas, CC BY 4.0).
+- **Changes made:** UV-unwrapped and textured with PBR maps (base colour, normal,
+  occlusion/roughness/metallic) in Adobe Substance 3D Painter 12.2.0 for this project.
+  Geometry is unchanged. Source export: `assets-source/heart-male-textured.glb`.
+- **Attribution line when this model is shown:**
+  > Anatomy model: HuBMAP Human Reference Atlas, "Reference organ — heart, male" (v1.3),
+  > used under CC BY 4.0, UV-unwrapped and textured for this lesson.
+  > Source: https://purl.humanatlas.io/ref-organ/heart-male/v1.3
+- **Pipeline:** `node tools/painter-glb-fix.mjs` (restores unique mesh names and per-part
+  ontology ids that the Painter export drops), then `gltf-transform optimize` with
+  `--compress meshopt --texture-compress webp --texture-size 1024` and the same
+  graph-preserving flags as above.

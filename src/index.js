@@ -48,8 +48,11 @@ const _eye = new THREE.Vector3();
 
 async function boot() {
 	model = await AnatomyModel.load({
-		url: 'assets/anatomy/heart-male.opt.glb',
+		// Which model is authored in the lesson data, so switching back to the untextured
+		// reference heart is a one-line JSON change rather than a rebuild of the loader.
+		url: lessonData.runtime.modelUrl ?? 'assets/anatomy/heart-male.opt.glb',
 		registry,
+		colour: lessonData.runtime.modelColour ?? 'texture',
 	});
 	model.place(lessonData.runtime.tablePlacement);
 	model.explodeGain = lessonData.runtime.explodeGain ?? 0.55;
