@@ -71,6 +71,22 @@ export class Lesson {
 		this.t = new THREE.Vector3();
 		this.ray = new THREE.Raycaster();
 		this.hover = null;
+		// The part the student last pressed, named ON the anatomy rather than only in the
+		// feedback card. By the time a student has looked down at a card and back up, which
+		// shape they pressed is no longer obvious - especially exploded, with a dozen similar
+		// forms in view.
+		this.selId = null;
+		this.selGroup = new THREE.Group();
+		this.selLabel = makeLabel(this.data.runtime?.labelTextHeightMetres ?? 0.014, 0xffffff);
+		this.selLine = makeLeaderLine();
+		this.selGroup.add(this.selLabel);
+		this.selGroup.visible = false;
+		this.selLine.visible = false;
+		this.root.add(this.selGroup);
+		this.root.add(this.selLine);
+		// Which controller is driving. Right-hand-first would leave a left-handed student
+		// pointing with a dead controller whenever both are tracked.
+		this.lastHand = 'right';
 		this.flow = { i: 0, misses: 0 };
 		this.find = { queue: [], asked: null, misses: 0 };
 		this.done = false;
@@ -90,13 +106,34 @@ export class Lesson {
 		for (const c of data.callouts ?? []) {
 			if (!this.model.parts.get(c.anchor)) continue;
 			const marker = new THREE.Group();
-			const dot = new THREE.Mesh(
-				new THREE.SphereGeometry(0.0075, 16, 12),
-				new THREE.MeshBasicMaterial({ color: 0x37c8ff }),
-			);
+			// A callout that plays a clip gets a PLAY TRIANGLE in a warmer colour instead of the
+			// round dot. Identical markers left the one launcher in the lesson indistinguishable
+			// from the three text callouts, so nothing told a student the footage existed. A
+			// three-sided cone reads as a triangle from any angle a student can reach, and shape
+			// survives the red-green colour deficiency that colour alone would exclude.
+			const isVideo = !!c.video;
+			const dot = isVideo
+				? new THREE.Mesh(
+						new THREE.ConeGeometry(0.011, 0.019, 3),
+						new THREE.MeshBasicMaterial({ color: 0xffc14d }),
+					)
+				: new THREE.Mesh(
+						new THREE.SphereGeometry(0.0075, 16, 12),
+						new THREE.MeshBasicMaterial({ color: 0x37c8ff }),
+					);
+			// Point the triangle the way a play glyph does.
+			if (isVideo) dot.rotation.z = -Math.PI / 2;
 			dot.userData.calloutIndex = this.callouts.length;
 			const hover = makeLabel(this.data.runtime?.labelTextHeightMetres ?? 0.014, 0xffffff);
-			hover.position.y = 0.03;
+			// makeLabel deliberately never wraps, because a PART NAME must stay on one line.
+			// A callout title is a sentence, so without a wrap width it stretches right across
+			// the organ it is pointing at - caught in a screenshot, not by any assertion.
+			hover.userData.text.maxWidth = this.data.runtime?.calloutLabelWrapMetres ?? 0.22;
+			// Lifted well clear of the organ instead of being drawn through it. The marker sits
+			// ON the surface of its part, so a tooltip a few millimetres above it is half
+			// swallowed by the anatomy - and defeating depth testing is not the fix, because
+			// troika re-derives its material on every sync and the flags do not survive.
+			hover.position.y = this.data.runtime?.calloutLabelLiftMetres ?? 0.14;
 			hover.visible = false;
 			marker.add(dot, hover);
 			this.calloutGroup.add(marker);
@@ -105,6 +142,9 @@ export class Lesson {
 				marker,
 				dot,
 				hover,
+				isVideo,
+				// Kept per marker so hover can restore the right idle tint for its kind.
+				tint: isVideo ? 0xffc14d : 0x37c8ff,
 				offset: new THREE.Vector3(...(c.offset ?? [0, 0.05, 0])),
 			});
 			this.calloutDots.push(dot);
@@ -439,9 +479,23 @@ export class Lesson {
 	/** Re-anchor every visible marker to its part; parts move during explode/scatter. */
 	placeCallouts() {
 		const s = this.model.group.scale.x;
+		const eye = this.camera.getWorldPosition(this._calloutEye || (this._calloutEye = new THREE.Vector3()));
+		const toEye = this._calloutDir || (this._calloutDir = new THREE.Vector3());
+		const rel = this._calloutRel || (this._calloutRel = new THREE.Vector3());
+		const standoff = this.data.runtime?.calloutStandoffMetres ?? 0.012;
 		for (const c of this.callouts) {
 			if (!c.marker.visible) continue;
-			c.marker.position.copy(this.model.center(c.spec.anchor)).addScaledVector(c.offset, s);
+			const centre = this.model.center(c.spec.anchor);
+			c.marker.position.copy(centre).addScaledVector(c.offset, s);
+			// Keep the marker on the NEAR side of its own part. The authored offset is relative
+			// to the part, not to the viewer, so from the seated eye the left-ventricle marker
+			// sat 4 cm INSIDE the organ - the one launcher in the lesson was invisible. Only
+			// the depth toward the eye is corrected; the authored sideways/vertical placement
+			// is kept. Analytic, not a raycast, because this runs every frame on a 149k-tri model.
+			toEye.copy(eye).sub(centre).normalize();
+			const depth = rel.copy(c.marker.position).sub(centre).dot(toEye);
+			const need = this.model.radius(c.spec.anchor) + standoff;
+			if (depth < need) c.marker.position.addScaledVector(toEye, need - depth);
 		}
 	}
 
@@ -471,7 +525,7 @@ export class Lesson {
 		if (this.calloutHover === next) return;
 		const prev = this.callouts[this.calloutHover];
 		if (prev) {
-			prev.dot.material.color.setHex(0x37c8ff);
+			prev.dot.material.color.setHex(prev.tint);
 			prev.dot.scale.setScalar(1);
 			prev.hover.visible = false;
 		}
@@ -480,7 +534,11 @@ export class Lesson {
 		if (c) {
 			c.dot.material.color.setHex(0xffffff);
 			c.dot.scale.setScalar(1.4);
-			c.hover.userData.text.text = this.textOf(c.spec.title);
+			// Say what the marker DOES, not only what it is about: a student reading just the
+			// title has no way to know this one opens footage rather than a text card.
+			c.hover.userData.text.text = c.isVideo
+				? `Watch: ${this.textOf(c.spec.title)}`
+				: this.textOf(c.spec.title);
 			c.hover.userData.text.sync();
 			c.hover.visible = true;
 		}
@@ -551,6 +609,8 @@ export class Lesson {
 			this.backBtn,
 			this.resetBtn,
 			this.hoverLine,
+			this.selGroup,
+			this.selLine,
 		].filter(Boolean);
 	}
 
@@ -972,6 +1032,9 @@ export class Lesson {
 		this.waypointGroup.visible = !!a.flow;
 		if (labelIds) this.buildLabels(labelIds);
 		this.hover = null;
+		// The name of a part pressed in the previous step would otherwise hang over anatomy
+		// the new step may have rearranged or hidden.
+		this.clearSelected();
 
 		if (a.isolate) this.model.isolate(a.isolate);
 		if (a.ghost) this.model.ghost(a.ghost);
@@ -1207,6 +1270,7 @@ export class Lesson {
 		this.hoverSay('');
 		this.clearSay();
 		this.closeCallout();
+		this.clearSelected();
 		this.dismissVideo();
 		this.grabEnd();
 		this.model.returnMoved();
@@ -1226,6 +1290,102 @@ export class Lesson {
 			const st = this.steps[this.i];
 			if (st?.action?.hoverNames) this.hoverSay(this.partName(id));
 		}
+	}
+
+	/**
+	 * Name the selected part where the part IS, with a leader line back to it.
+	 *
+	 * Deliberately separate from the hover readout: hover is transient and follows the ray, so
+	 * it cannot answer "which one did I just press?" a moment later. Shown for every press,
+	 * right or wrong - naming what you touched is not a claim that it was correct, and the
+	 * badge and the card already carry correctness.
+	 */
+	showSelected(id) {
+		if (!id || !this.model.parts.get(id)) return this.clearSelected();
+		this.selId = id;
+		this.selLabel.userData.text.text = this.partName(id);
+		this.selLabel.userData.text.sync();
+		this.selGroup.visible = true;
+		this.selLine.visible = true;
+		this.placeSelected();
+		return true;
+	}
+
+	clearSelected() {
+		this.selId = null;
+		this.selGroup.visible = false;
+		this.selLine.visible = false;
+		return false;
+	}
+
+	/** Re-anchor the selected label; the part moves under explode, grab and scatter. */
+	placeSelected() {
+		if (!this.selId || !this.selGroup.visible) return;
+		const s = this.model.group.scale.x;
+		const at = this.model.center(this.selId);
+		// Lifted along the model's own scale so the label clears the surface at any size, and
+		// higher than a callout dot so the two never occupy the same spot.
+		// Lifted clear of the callout markers, which sit ~0.05 model units above the same part
+		// and would otherwise share the spot with the name.
+		const label = at.clone().addScaledVector(new THREE.Vector3(0, 1, 0), 0.13 * s);
+		this.selGroup.position.copy(label);
+		updateLeaderLine(this.selLine, at, label);
+	}
+
+	/**
+	 * Which controller is driving the interface this frame.
+	 *
+	 * Handover is by AIM, not by a setting: the active hand keeps control while its ray is on
+	 * something, and the other takes over the moment it finds a target. A left-handed student
+	 * just points, and never has to discover a handedness option. Falls back to whichever
+	 * controller is tracked when only one is.
+	 */
+	activeController(controllers) {
+		const R = controllers?.right?.raySpace?.visible ? controllers.right : null;
+		const L = controllers?.left?.raySpace?.visible ? controllers.left : null;
+		if (!R || !L) return R || L;
+		const last = this.lastHand === 'left' ? L : R;
+		const other = last === R ? L : R;
+		if (this.aimFindsTarget(last)) return last;
+		if (this.aimFindsTarget(other)) {
+			this.lastHand = other === R ? 'right' : 'left';
+			return other;
+		}
+		return last;
+	}
+
+	/** Hand to use, as a name, for callers that need the side rather than the controller. */
+	activeHand(controllers) {
+		const c = this.activeController(controllers);
+		if (!c) return null;
+		return c === controllers?.left ? 'left' : 'right';
+	}
+
+	/** Aim this controller's ray and report whether it is on anything interactive. */
+	aimFindsTarget(c) {
+		if (!this.setRayFrom(c)) return false;
+		if (this.video.isOpen)
+			return !!(
+				this.video.pickClose(this.ray) ||
+				this.video.pickMute(this.ray) ||
+				this.video.pickScrub(this.ray) ||
+				this.video.pickPanel(this.ray)
+			);
+		if (this.continueBtn.visible && this.ray.intersectObject(this.continueBtn.userData.plate, false).length)
+			return true;
+		if (this.pickNav(this.ray)) return true;
+		if (this.quiz && this.pickQuiz(this.ray)) return true;
+		if (this.callouts.length && this.pickCallout(this.ray)) return true;
+		return this.model.hitList(this.ray, this.pickOpts()).length > 0;
+	}
+
+	/** Point this.ray down a controller's -Z. Returns false when that hand is not tracked. */
+	setRayFrom(c) {
+		if (!c?.raySpace?.visible) return false;
+		const o = c.raySpace.getWorldPosition(new THREE.Vector3());
+		const d = new THREE.Vector3(0, 0, -1).applyQuaternion(c.raySpace.getWorldQuaternion(new THREE.Quaternion()));
+		this.ray.set(o, d);
+		return true;
 	}
 
 	hoverSay(msg) {
@@ -1272,6 +1432,7 @@ export class Lesson {
 	select(id) {
 		// Any part press dismisses an open callout: the student has moved on to something else.
 		if (id) this.closeCallout();
+		if (id) this.showSelected(id);
 		if (!id) {
 			if (this.done) this.reset();
 			return null;
@@ -1372,11 +1533,8 @@ export class Lesson {
 
 	/** Is the controller ray currently on the Continue plate? */
 	pickButton(controllers) {
-		const ct = controllers?.right || controllers?.left;
-		if (!ct?.raySpace?.visible) return false;
-		const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
-		const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
-		this.ray.set(o, d);
+		const ct = this.activeController(controllers);
+		if (!this.setRayFrom(ct)) return false;
 		return this.ray.intersectObject(this.continueBtn.userData.plate, false).length > 0;
 	}
 
@@ -1426,12 +1584,9 @@ export class Lesson {
 		if (this.callouts.length) this.placeCallouts();
 		if (this.calloutHover != null) this.callouts[this.calloutHover].hover.quaternion.copy(camQ);
 
-		const ct = controllers?.right || controllers?.left;
+		const ct = this.activeController(controllers);
 		let hitDist = null;
-		if (ct?.raySpace?.visible) {
-			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
-			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
-			this.ray.set(o, d);
+		if (this.setRayFrom(ct)) {
 			// The clip owns the whole pick chain while it is up: everything else is behind an
 			// opaque panel, and hovering a part the student cannot see is meaningless.
 			if (this.video.isOpen) {
@@ -1515,6 +1670,11 @@ export class Lesson {
 			const corner = new THREE.Vector3((toward * this.ui.panelW) / 2, -(this.calloutPanel.height || 0.04), 0);
 			pg.updateMatrixWorld();
 			updateLeaderLine(this.calloutLine, from, pg.localToWorld(corner));
+		}
+
+		if (this.selGroup.visible) {
+			this.placeSelected();
+			this.selLabel.quaternion.copy(camQ);
 		}
 
 		if (this.labelGroup.visible) this.updateLabels();

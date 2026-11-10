@@ -202,7 +202,7 @@ function onFrame(delta, _time, globals) {
 	// the student's head is, so it is theirs to set. Suppressed in ?tune=1, where the stick
 	// belongs to the tuner.
 	if (!tuner) {
-		const sc = controllers.right || controllers.left;
+		const sc = controllers[lesson.activeHand(controllers) ?? 'right'] || controllers.right || controllers.left;
 		const sy = sc?.gamepad?.getAxis?.(XR_AXES.THUMBSTICK_Y) ?? 0;
 		if (Math.abs(sy) > 0.18) lesson.adjustSpread(-sy * delta * 0.9);
 	}
@@ -218,8 +218,9 @@ function onFrame(delta, _time, globals) {
 	};
 	const bothTriggers = held.right && held.left;
 	if (bothTriggers && !lesson.grab) {
-		// The aiming hand drives: hover is picked from the same controller Lesson.update uses.
-		lesson.grabStart(controllers.right ? 'right' : 'left', controllers, 'triggers');
+		// The hand that is AIMING drives the grab, not a hardcoded side - with both triggers
+		// held, the hand holding the part has to be the one the pointer came from.
+		lesson.grabStart(lesson.activeHand(controllers) ?? 'right', controllers, 'triggers');
 	}
 	// Letting go of either trigger ends a TRIGGER grab. Scoped by gesture so it cannot also
 	// cancel a squeeze grab, which is held with no triggers down at all.
@@ -230,7 +231,10 @@ function onFrame(delta, _time, globals) {
 		if (!gp) continue;
 		const other = hand === 'right' ? 'left' : 'right';
 		// Squeeze still grabs one-handed. It costs nothing to keep and is quicker once known.
-		if (gp.getButtonDown?.(XR_BUTTONS.SQUEEZE)) lesson.grabStart(hand, controllers, 'squeeze');
+		if (gp.getButtonDown?.(XR_BUTTONS.SQUEEZE)) {
+			lesson.lastHand = hand;
+			lesson.grabStart(hand, controllers, 'squeeze');
+		}
 		if (gp.getButtonUp?.(XR_BUTTONS.SQUEEZE)) lesson.grabEnd(hand, 'squeeze');
 
 		if (gp.getButtonDown?.(XR_BUTTONS.TRIGGER)) triggerGesture[hand] = held[other];
@@ -239,7 +243,12 @@ function onFrame(delta, _time, globals) {
 		if (gp.getButtonUp?.(XR_BUTTONS.TRIGGER)) {
 			const wasGesture = triggerGesture[hand];
 			triggerGesture[hand] = false;
-			if (!wasGesture && !lesson.grab) triggerAction(controllers);
+			if (!wasGesture && !lesson.grab) {
+				// A press claims control for that hand, so a left-handed student taking over
+				// mid-lesson does not have to out-aim the right controller.
+				lesson.lastHand = hand;
+				triggerAction(controllers);
+			}
 		}
 	}
 
