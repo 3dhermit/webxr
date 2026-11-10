@@ -226,7 +226,7 @@
         "ghost": [
           "UBERON:0002080"
         ],
-        "explode": 0.25,
+        "explode": 0,
         "hoverNames": true
       },
       "why": "Structure–function reasoning is the transferable idea; the wall-thickness contrast is the visible evidence for it."

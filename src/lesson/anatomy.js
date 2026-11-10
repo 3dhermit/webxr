@@ -166,6 +166,9 @@ export class AnatomyModel {
 	beginGrab(id) {
 		const p = this.parts.get(id);
 		if (!p) return null;
+		// Grabbing a part mid-flight takes it from wherever it has got to, rather than
+		// snapping it home first.
+		this.cancelHoming(id);
 		p.held = true;
 		return {
 			pos: p.mesh.getWorldPosition(new THREE.Vector3()),
@@ -204,6 +207,65 @@ export class AnatomyModel {
 		return true;
 	}
 
+	/**
+	 * Send hand-moved and hand-turned parts home over `dur` seconds instead of teleporting.
+	 *
+	 * Used on a step change. A part the student pulled out and spun in step 2 used to jump
+	 * home in a single frame on Continue, which reads as the model glitching rather than the
+	 * lesson putting it back. Full Reset still uses the instant returnMoved(): between two
+	 * students, exactness beats animation.
+	 */
+	homeMoved(dur = 0.8) {
+		this.homing = [];
+		for (const [id, p] of this.parts) {
+			p.held = false;
+			if (!p.moved && !p.turned) continue;
+			this.homing.push({
+				id,
+				p,
+				moved0: p.moved ? p.moved.clone() : null,
+				quat0: p.mesh.quaternion.clone(),
+			});
+		}
+		this.homingT = 0;
+		this.homingDur = dur;
+		if (!this.homing.length) this.homing = null;
+		this.apply();
+		return this.homing ? this.homing.length : 0;
+	}
+
+	/** Advance a homing in progress. Lands EXACTLY on the authored pose. */
+	stepHoming(dt) {
+		if (!this.homing) return false;
+		this.homingT += dt;
+		const k = Math.min(1, this.homingT / this.homingDur);
+		// Ease-out: moves at once and settles gently - an ease-in looked like nothing happened.
+		const e = 1 - (1 - k) ** 3;
+		for (const h of this.homing) {
+			const p = h.p;
+			if (k >= 1) {
+				// Finish on the stored authored values, not on an interpolated float, so the
+				// part ends bit-identical to where it started the lesson.
+				p.moved = null;
+				p.turned = false;
+				p.mesh.quaternion.copy(p.homeQuat);
+				continue;
+			}
+			if (h.moved0) (p.moved ||= new THREE.Vector3()).copy(h.moved0).multiplyScalar(1 - e);
+			p.mesh.quaternion.slerpQuaternions(h.quat0, p.homeQuat, e);
+		}
+		if (k >= 1) this.homing = null;
+		this.apply();
+		return true;
+	}
+
+	/** Drop one part out of a homing in progress, leaving it where it currently is. */
+	cancelHoming(id) {
+		if (!this.homing) return;
+		this.homing = this.homing.filter((h) => h.id !== id);
+		if (!this.homing.length) this.homing = null;
+	}
+
 	/** Ids the student has displaced or turned by hand. */
 	movedIds() {
 		return [...this.parts].filter(([, p]) => p.moved || p.turned).map(([id]) => id);
@@ -219,6 +281,8 @@ export class AnatomyModel {
 	 * one pass over 14 objects.
 	 */
 	returnMoved() {
+		// The instant path wins over any smooth homing in flight.
+		this.homing = null;
 		let n = 0;
 		for (const p of this.parts.values()) {
 			if (p.moved || p.turned || p.held) n += 1;

@@ -1029,6 +1029,10 @@ export class Lesson {
 		// they are fanned. Everything else stays available by pointing at it.
 		const labelIds = a.labels === 'core' ? this.data.tiers.core : Array.isArray(a.labels) ? a.labels : null;
 		this.labelGroup.visible = !!labelIds;
+		// Leader lines live in their own group and are only rebuilt when the NEXT step has labels
+		// of its own. Without this, step 2's four leaders carried into step 3 frozen where the
+		// exploded parts used to be, pointing at empty space beside the reassembled heart.
+		this.lineGroup.visible = !!labelIds;
 		this.waypointGroup.visible = !!a.flow;
 		if (labelIds) this.buildLabels(labelIds);
 		this.hover = null;
@@ -1049,7 +1053,8 @@ export class Lesson {
 		// Each step authors its own arrangement (isolate/ghost/explode), so hand-displaced parts
 		// go home on a step change or the next step sets up over a model the student rearranged.
 		this.grabEnd();
-		this.model.returnMoved();
+		// Glide hand-moved parts home rather than teleporting them (Full Reset stays instant).
+		this.model.homeMoved(0.8);
 		if (!a.quiz && (this.quiz || this.quizGroup.visible)) {
 			// Leaving the quiz by any route (prev(), reset()) must take its plates with it.
 			this.quiz = null;
@@ -1066,7 +1071,12 @@ export class Lesson {
 		this.stepFactor = target;
 		this.extraSpread = 0;
 		if (a.reassemble) this.model.scatter();
-		this.tweenFactor(target, a.explode === 0 ? 0.6 : 5.0);
+		// Coming back TOGETHER is quick and eases OUT, so it visibly starts moving the instant
+		// Continue is pressed. It used to reuse the 5 s ease-in-out built for the slow explode
+		// reveal, which barely moved for the first second and read as "nothing happened".
+		const collapsing = target < this.model.factor - 1e-4;
+		if (collapsing) this.tweenFactor(target, 0.8, 'out');
+		else this.tweenFactor(target, a.explode === 0 ? 0.6 : 5.0);
 
 		this.prompt.set(`Step ${this.i + 1} of ${this.steps.length} · ${st.title}\n\n${st.verb.toUpperCase()} — ${this.textOf(st.prompt)}`);
 		this.say(this.misconceptionFor(st.id));
@@ -1214,13 +1224,13 @@ export class Lesson {
 		this.continueBtn.userData.caption.sync();
 	}
 
-	tweenFactor(to, dur) {
+	tweenFactor(to, dur, ease = 'inOut') {
 		this.tweens = this.tweens.filter((tw) => !tw.factor);
 		if (Math.abs(this.model.factor - to) < 1e-4) {
 			this.model.setFactor(to);
 			return;
 		}
-		this.tweens.push({ factor: true, from: this.model.factor, to, t: 0, dur });
+		this.tweens.push({ factor: true, from: this.model.factor, to, t: 0, dur, ease });
 	}
 
 	next() {
@@ -1561,10 +1571,13 @@ export class Lesson {
 		for (const tw of this.tweens) {
 			tw.t += dt;
 			const k = Math.min(1, tw.t / tw.dur);
-			const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
-			this.model.setFactor(tw.from + (tw.to - tw.from) * e + this.extraSpread);
+			const e = tw.ease === 'out' ? 1 - (1 - k) ** 3 : k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+			// The final frame lands on `to` exactly (e === 1), so the model never rests a float
+			// hair away from its authored arrangement.
+			this.model.setFactor(k >= 1 ? tw.to + this.extraSpread : tw.from + (tw.to - tw.from) * e + this.extraSpread);
 		}
 		this.tweens = this.tweens.filter((tw) => tw.t < tw.dur);
+		this.model.stepHoming(dt);
 
 		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
 		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed
