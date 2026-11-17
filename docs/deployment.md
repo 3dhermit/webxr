@@ -4,11 +4,20 @@
 
 | URL | Source | Use |
 |---|---|---|
-| `https://3dhermit.github.io/webxr-first-steps/` | `main` | **the classroom lesson** — what a class loads |
-| `https://3dhermit.github.io/webxr-first-steps/next/` | `anatomy-vr` | candidate for side-by-side testing on a second headset |
+| `https://3dhermit.github.io/webxr/` | `main` | **the classroom lesson** — what a class loads |
+| `https://3dhermit.github.io/webxr/next/` | `anatomy-vr` | candidate for side-by-side testing on a second headset |
 
 WebXR requires **HTTPS**, so `file://` and plain http never reach VR mode. GitHub Pages
 supplies that for free.
+
+> **Renaming the repo changes the classroom URL, and nothing redirects.** GitHub follows the
+> rename for the site path, so the new URL serves the site, but the old Pages URL returns
+> **404** — the site you published does not follow you. `git` pushes keep working (GitHub
+> redirects git traffic), which is what hides the break: CI stays green while every bookmark,
+> worksheet link, and headset history entry points at a dead page. After a rename: update every
+> `github.io` URL in the README and docs, `git remote set-url origin`, and re-check the old URL
+> returns 404 so you know the new one is the only door. Upstream credits
+> (`github.com/meta-quest/...`) are *not* renames — do not blanket-replace a slug.
 
 Cache discipline: Pages serves aggressively. Add a cache-buster to a classroom URL when a
 lesson changes (`?v=heart1`). Lesson versions are tagged (`git tag heart-lesson-v1`).
