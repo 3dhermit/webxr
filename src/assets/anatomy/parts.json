@@ -2,11 +2,11 @@
   "source": "HuBMAP Human Reference Atlas heart-male v1.3, CC BY 4.0",
   "model": "src/assets/anatomy/heart-male.opt.glb",
   "modelCenter": [
-    0.0191,
-    0.4698,
-    0.0425
+    0.0004,
+    -0.0063,
+    0.0049
   ],
-  "totalTriangles": 164119,
+  "totalTriangles": 163317,
   "explodeSolve": {
     "parts": 14,
     "pairs": 91,
@@ -18,36 +18,36 @@
   "parts": [
     {
       "id": "UBERON:0002078",
-      "mesh": "VH_M_right_cardiac_atrium",
+      "mesh": "right_cardiac_atrium",
       "label": "right cardiac atrium",
       "system": "chamber",
       "center": [
-        -0.0174,
-        0.4809,
-        0.0344
+        -0.0361,
+        0.0048,
+        -0.0032
       ],
       "size": [
         0.0521,
         0.0958,
         0.0628
       ],
-      "triangles": 48186,
+      "triangles": 47384,
       "out": [
-        -0.097,
-        0.729,
-        -0.678
+        -0.021,
+        0.708,
+        -0.706
       ],
       "spread": 0.35
     },
     {
       "id": "UBERON:0002079",
-      "mesh": "VH_M_left_cardiac_atrium",
+      "mesh": "left_cardiac_atrium",
       "label": "left cardiac atrium",
       "system": "chamber",
       "center": [
-        0.0044,
-        0.4926,
-        0.0085
+        -0.0144,
+        0.0165,
+        -0.0291
       ],
       "size": [
         0.073,
@@ -56,21 +56,21 @@
       ],
       "triangles": 33946,
       "out": [
-        0.286,
-        0.575,
-        -0.767
+        -0.008,
+        0.704,
+        -0.71
       ],
       "spread": 0.204
     },
     {
       "id": "UBERON:0002080",
-      "mesh": "VH_M_heart_right_ventricle",
+      "mesh": "heart_right_ventricle",
       "label": "heart right ventricle",
       "system": "chamber",
       "center": [
-        0.0177,
-        0.4722,
-        0.0575
+        -0.0011,
+        -0.0039,
+        0.0199
       ],
       "size": [
         0.0831,
@@ -79,21 +79,21 @@
       ],
       "triangles": 27622,
       "out": [
-        -0.099,
-        -0.994,
-        0.039
+        -0.076,
+        -0.995,
+        0.06
       ],
-      "spread": 0.216
+      "spread": 0.35
     },
     {
       "id": "UBERON:0002146",
-      "mesh": "VH_M_pulmonary_valve",
+      "mesh": "pulmonary_valve",
       "label": "pulmonary valve",
       "system": "valve",
       "center": [
-        0.0172,
-        0.5085,
-        0.0423
+        -0.0015,
+        0.0324,
+        0.0047
       ],
       "size": [
         0.0257,
@@ -106,17 +106,17 @@
         1,
         0
       ],
-      "spread": 0.141
+      "spread": 0.238
     },
     {
       "id": "UBERON:0002134",
-      "mesh": "VH_M_tricuspid_valve",
+      "mesh": "tricuspid_valve",
       "label": "tricuspid valve",
       "system": "valve",
       "center": [
-        -0.0055,
-        0.4599,
-        0.0457
+        -0.0242,
+        -0.0161,
+        0.0081
       ],
       "size": [
         0.0377,
@@ -125,21 +125,21 @@
       ],
       "triangles": 12490,
       "out": [
-        -0.02,
-        1,
-        0.003
+        -0.398,
+        0.793,
+        0.461
       ],
-      "spread": 0.243
+      "spread": 0.196
     },
     {
       "id": "UBERON:0002084",
-      "mesh": "VH_M_heart_left_ventricle",
+      "mesh": "heart_left_ventricle",
       "label": "heart left ventricle",
       "system": "chamber",
       "center": [
-        0.0427,
-        0.4643,
-        0.0415
+        0.024,
+        -0.0118,
+        0.0039
       ],
       "size": [
         0.0764,
@@ -148,21 +148,21 @@
       ],
       "triangles": 9350,
       "out": [
-        0.019,
-        -1,
-        -0.001
+        0.308,
+        -0.933,
+        -0.188
       ],
-      "spread": 0.35
+      "spread": 0.199
     },
     {
       "id": "UBERON:0002094",
-      "mesh": "VH_M_interventricular_septum",
+      "mesh": "interventricular_septum",
       "label": "interventricular septum",
-      "system": "chamber",
+      "system": "wall",
       "center": [
-        0.0326,
-        0.4633,
-        0.0501
+        0.0138,
+        -0.0128,
+        0.0126
       ],
       "size": [
         0.0519,
@@ -179,13 +179,13 @@
     },
     {
       "id": "UBERON:0002135",
-      "mesh": "VH_M_mitral_valve",
+      "mesh": "mitral_valve",
       "label": "mitral valve",
       "system": "valve",
       "center": [
-        0.0227,
-        0.4771,
-        0.0117
+        0.0039,
+        0.001,
+        -0.0259
       ],
       "size": [
         0.0366,
@@ -194,21 +194,21 @@
       ],
       "triangles": 6468,
       "out": [
-        0.003,
-        1,
-        -0.025
+        0.189,
+        0.95,
+        -0.247
       ],
-      "spread": 0.272
+      "spread": 0.227
     },
     {
       "id": "UBERON:0002137",
-      "mesh": "VH_M_aortic_valve",
+      "mesh": "aortic_valve",
       "label": "aortic valve",
       "system": "valve",
       "center": [
-        0.0068,
-        0.4992,
-        0.0286
+        -0.0119,
+        0.0231,
+        -0.0089
       ],
       "size": [
         0.0247,
@@ -221,17 +221,17 @@
         1,
         -0.011
       ],
-      "spread": 0.108
+      "spread": 0.102
     },
     {
       "id": "FMA:7264",
-      "mesh": "VH_M_papillary_muscle_of_heart_anterior",
+      "mesh": "papillary_muscle_anterior",
       "label": "Anterior papillary muscle of left ventricle",
       "system": "support",
       "center": [
-        0.019,
-        0.453,
-        0.0771
+        0.0002,
+        -0.0231,
+        0.0396
       ],
       "size": [
         0.0233,
@@ -240,21 +240,21 @@
       ],
       "triangles": 638,
       "out": [
-        0.192,
-        -0.785,
-        0.589
+        -0.131,
+        -0.812,
+        0.569
       ],
-      "spread": 0.096
+      "spread": 0.101
     },
     {
       "id": "FMA:7267",
-      "mesh": "VH_M_papillary_muscle_of_heart_posteromedial",
+      "mesh": "papillary_muscle_posteromedial",
       "label": "Posteromedial head of posterior papillary muscle of left ventricle",
       "system": "support",
       "center": [
-        0.0455,
-        0.4583,
-        0.0419
+        0.0267,
+        -0.0178,
+        0.0043
       ],
       "size": [
         0.0272,
@@ -263,21 +263,21 @@
       ],
       "triangles": 576,
       "out": [
-        0.306,
-        -0.918,
-        -0.254
+        0.019,
+        -1,
+        0
       ],
-      "spread": 0.096
+      "spread": 0.094
     },
     {
       "id": "FMA:7265",
-      "mesh": "VH_M_papillary_muscle_of_heart_anterolateral",
+      "mesh": "papillary_muscle_anterolateral",
       "label": "Anterolateral head of lateral papillary muscle of left ventricle",
       "system": "support",
       "center": [
-        0.0455,
-        0.4693,
-        0.0419
+        0.0267,
+        -0.0068,
+        0.0043
       ],
       "size": [
         0.0292,
@@ -290,17 +290,17 @@
         -1,
         0
       ],
-      "spread": 0.053
+      "spread": 0.051
     },
     {
       "id": "FMA:7262",
-      "mesh": "VH_M_papillary_muscle_of_heart_medial",
+      "mesh": "papillary_muscle_medial",
       "label": "Septal papillary muscle of right ventricle",
       "system": "support",
       "center": [
-        0.0244,
-        0.444,
-        0.0546
+        0.0057,
+        -0.0321,
+        0.017
       ],
       "size": [
         0.0063,
@@ -309,21 +309,21 @@
       ],
       "triangles": 152,
       "out": [
-        0.313,
-        -0.95,
-        0.011
+        0.109,
+        -0.897,
+        -0.429
       ],
-      "spread": 0.115
+      "spread": 0.099
     },
     {
       "id": "FMA:7261",
-      "mesh": "VH_M_papillary_muscle_of_heart_posterior",
+      "mesh": "papillary_muscle_posterior",
       "label": "Posterior papillary muscle of right ventricle",
       "system": "support",
       "center": [
-        0.0126,
-        0.4341,
-        0.0587
+        -0.0062,
+        -0.0419,
+        0.0212
       ],
       "size": [
         0.0084,
@@ -332,11 +332,11 @@
       ],
       "triangles": 131,
       "out": [
-        -0.117,
-        -0.94,
-        -0.321
+        -0.005,
+        -1,
+        0.013
       ],
-      "spread": 0.091
+      "spread": 0.098
     }
   ]
 }
