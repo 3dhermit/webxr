@@ -136,7 +136,7 @@ function onFrame(delta, _time, globals) {
 		hud.textContent = [
 			`step ${s.step}  ${s.stepId}  level=${s.level}`,
 			`explode ${s.factor}  hover=${s.hover ?? '-'}  ready=${s.ready}`,
-			`flow ${s.flow.i}/8 misses=${s.flow.misses}   find left=${s.find.left}`,
+			`flow ${s.flow ? `${s.flow.i}/8 misses=${s.flow.misses}` : '-'}   find left=${s.find.left}`,
 			`draw ${s.drawCalls}  tris ${s.tris}`,
 		].join('\n');
 	}
