@@ -2,10 +2,20 @@
  * Anatomy model: loads the optimized HRA heart, joins it to the generated geometry registry,
  * and exposes the teaching verbs (explode / isolate / ghost / highlight / assemble-one-part).
  *
- * Two non-obvious rules baked in here:
+ * Three non-obvious rules baked in here:
  *  - Do NOT flatten the glTF. KHR_mesh_quantization carries dequantization scale on ancestor
  *    nodes; reparenting meshes and resetting TRS inflates them ~10x and collapses the model.
  *  - HRA ships ONE material shared by all parts, so per-part colour/highlight needs a clone.
+ *  - Exploding is HYBRID: the 9 major parts ride baked 2.5 s clips (eased multi-keyframe
+ *    positions, authored per part) on a shared AnimationMixer; the 5 papillary muscles have no
+ *    clips of their own and stay procedural, moving inside their (possibly exploded) group.
+ *    One part's "out" state is its action WEIGHT: 0 blends 100 % back to the saved rest pose,
+ *    1 is the full baked offset at the current scrub time. A group's clip is weighted 1 only
+ *    while at least one of its papillary is still out — otherwise the last-assembled muscle
+ *    would land at the group's exploded offset instead of its true home.
+ *  - The loader renames objects on name collision (node `aortic_valve` + mesh `aortic_valve`
+ *    -> the mesh becomes `aortic_valve_1`), so the registry's short name can land on the parent
+ *    NODE, not the mesh. Part matching must check both.
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -16,11 +26,14 @@ const SYS_HUE = { chamber: 0.6, valve: 0.045, support: 0.135, organ: 0.35 };
 export class AnatomyModel {
 	constructor(group, parts, box) {
 		this.group = group;
-		this.parts = parts; // Map id -> { mesh, spec, home, localOut, mat, assembled }
+		this.parts = parts; // Map id -> { mesh, node, spec, home, localOut, mat, outAmount, action? }
 		this.byMesh = new Map([...parts.values()].map((p) => [p.mesh.uuid, p]));
 		this.box = box;
 		this.explodeGain = 0.55;
 		this.factor = 0;
+		this.mixer = null; // built in _bindClips(); drives every baked explode clip
+		this.clipDuration = 0; // all clips share one length; scrub time is a fraction of this
+		this.groupActions = []; // [{ node, action, members }] for the papillary bundle nodes
 	}
 
 	static async load({ url, registry }) {
@@ -41,7 +54,14 @@ export class AnatomyModel {
 		const inv = new THREE.Matrix4();
 		const bb = new THREE.Box3();
 		for (const mesh of meshes) {
-			const spec = byMeshName.get(mesh.name);
+			// The registry's short name may sit on the MESH (papillary) or on the parent NODE
+			// (leaf parts: the loader demoted the same-named mesh to `<name>_1`).
+			let spec = byMeshName.get(mesh.name);
+			let node = mesh;
+			if (!spec && mesh.parent && byMeshName.has(mesh.parent.name)) {
+				spec = byMeshName.get(mesh.parent.name);
+				node = mesh.parent;
+			}
 			if (!spec) continue; // registry-driven: unknown meshes stay inert
 			mesh.material = mesh.material.clone();
 			mesh.material.color.setHSL(
@@ -65,6 +85,7 @@ export class AnatomyModel {
 			parts.set(spec.id, {
 				id: spec.id,
 				mesh,
+				node, // what actually explodes (the mesh itself for the papillary)
 				spec,
 				home: mesh.position.clone(),
 				centerLocal,
@@ -76,7 +97,58 @@ export class AnatomyModel {
 		}
 
 		const box = new THREE.Box3().setFromObject(root);
-		return new AnatomyModel(root, parts, box);
+		const model = new AnatomyModel(root, parts, box);
+		model._bindClips(gltf.animations);
+		return model;
+	}
+
+	/**
+	 * Wire the baked explode clips into the mixer.
+	 *
+	 * Each clip targets exactly one node: either a leaf part's anchor node (9) or a papillary
+	 * bundle node (2). Node identity comes from the binding's resolved node — NOT the clip
+	 * name (GLTFLoader sanitizes names: dots dropped, `_1` demotions, so string matching lies).
+	 *
+	 * Actions stay permanently active and are scrubbed by mixer.setTime() in apply(): at weight
+	 * 0 the PropertyMixer blends 100 % to the saved original (rest) state, which is what makes
+	 * assemble() a true snap-home. LoopOnce + clampWhenFinished keep a scrub past the end safe.
+	 */
+	_bindClips(animations) {
+		if (!animations.length) return;
+		this.mixer = new THREE.AnimationMixer(this.group);
+		this.clipDuration = Math.max(...animations.map((c) => c.duration));
+		for (const clip of animations) {
+			const action = this.mixer.clipAction(clip);
+			action.setLoop(THREE.LoopOnce, 1);
+			action.clampWhenFinished = true;
+			action.play();
+			// three r16x keeps the resolved bindings private (`_propertyBindings`), but
+			// play() -> mixer._activateAction() -> _bindAction() fills them synchronously.
+			// binding.NODE is the clip's resolved target node (set by findNode at
+			// construction); binding.rootNode is the mixer root — NOT the target.
+			// Fallback: track-name path (single-segment names in this GLB).
+			const pb = action._propertyBindings;
+			const node = (pb && pb[0] && pb[0].binding && pb[0].binding.node) ||
+				(clip.tracks[0] && this.group.getObjectByName(clip.tracks[0].name.split('.')[0]));
+			if (!node) continue;
+			let claimed = false;
+			for (const p of this.parts.values()) {
+				if (p.node === node) {
+					p.action = action;
+					claimed = true;
+				}
+			}
+			if (!claimed) {
+				// A bundle node: the clip targets a group whose meshes are the parts inside it.
+				const isDescendant = (obj, anc) => {
+					let n = obj.parent;
+					while (n) { if (n === anc) return true; n = n.parent; }
+					return false;
+				};
+				const members = [...this.parts.values()].filter((p) => isDescendant(p.mesh, node));
+				if (members.length) this.groupActions.push({ node, action, members });
+			}
+		}
 	}
 
 	/** Place the model on a tabletop relative to the player, so it works seated and standing.
@@ -136,11 +208,45 @@ export class AnatomyModel {
 		return o;
 	}
 
-	/** One scalar drives every part; per-part `outAmount` lets the reassembly task snap parts in. */
+	/**
+	 * Every visual state is a function of { factor, per-part outAmount, per-part look };
+	 * recompute wholesale, nothing accumulates.
+	 *
+	 * Hybrid explode: the 9 leaf parts and the 2 papillary groups ride baked clips. A part's
+	 * outAmount becomes its action WEIGHT — 0 blends 100 % back to the saved rest pose (which
+	 * is why assemble() snaps home exactly), 1 is the full baked offset at the scrub time —
+	 * and the shared factor scrubs the clips' time. The clips carry the artist's eased per-part
+	 * offsets, so the procedural spread math below only runs for the 5 papillary muscles, which
+	 * have no clips of their own (they move inside their group's, possibly exploded, frame).
+	 */
 	apply() {
+		const f = THREE.MathUtils.clamp(this.factor, 0, 1);
 		for (const p of this.parts.values()) {
-			const f = this.factor * p.outAmount;
-			p.mesh.position.copy(p.home).addScaledVector(p.localOut, p.spec.spread * f * this.explodeGain);
+			if (!p.action) continue;
+			p.action.setEffectiveWeight(p.outAmount);
+		}
+		// A group's clip is a no-op once every muscle in it is home — otherwise the last
+		// assembled papillary would land at the group's exploded offset, not its true seat.
+		for (const g of this.groupActions) {
+			const anyOut = g.members.some((m) => m.outAmount > 0);
+			g.action.setEffectiveWeight(anyOut ? 1 : 0);
+		}
+		if (this.mixer) {
+			// A LoopOnce action that ever reached the clip end gets PAUSED (clampWhenFinished),
+			// and a paused action zero-scales its delta — every later setTime would then read
+			// t=0 and the parts would collapse to rest while the factor says "out". Unpause
+			// before each scrub; time is always set explicitly below, so real-time advance is
+			// never mixed in.
+			for (const p of this.parts.values()) if (p.action) p.action.paused = false;
+			for (const g of this.groupActions) g.action.paused = false;
+			// Gain scales how deep into the (eased) clip we scrub. The baked curves are
+			// ease-out, so the lesson's compact 0.27 gain still reads as a full separation.
+			this.mixer.setTime(Math.min(f * this.explodeGain, 1) * this.clipDuration);
+		}
+		for (const p of this.parts.values()) {
+			if (p.action) continue;
+			const k = f * p.outAmount * this.explodeGain;
+			p.mesh.position.copy(p.home).addScaledVector(p.localOut, p.spec.spread * k);
 		}
 	}
 
