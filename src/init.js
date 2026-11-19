@@ -87,6 +87,23 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 		const gripSpace = renderer.xr.getControllerGrip(i);
 		const mesh = controllerModelFactory.createControllerModel(gripSpace);
 		gripSpace.add(mesh);
+		// F3: a visible ray pointer for each controller. The line is a unit segment along
+		// -Z that Lesson.updatePointers rescales to the hit distance every frame, so the
+		// student sees exactly where the trigger will land instead of guessing. Both
+		// children are made unpickable so they can never intercept an aim ray.
+		const rayLine = new THREE.Line(
+			new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
+			new THREE.LineBasicMaterial({ color: 0x9fc2e0, transparent: true, opacity: 0.55 }),
+		);
+		rayLine.raycast = () => {};
+		rayLine.scale.z = 3;
+		const cursor = new THREE.Mesh(
+			new THREE.SphereGeometry(0.008, 12, 10),
+			new THREE.MeshBasicMaterial({ color: 0x9fc2e0 }),
+		);
+		cursor.raycast = () => {};
+		cursor.position.z = -3;
+		raySpace.add(rayLine, cursor);
 		player.add(raySpace, gripSpace);
 		raySpace.visible = false;
 		gripSpace.visible = false;
@@ -99,6 +116,8 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 				gripSpace,
 				mesh,
 				gamepad: new GamepadWrapper(e.data.gamepad),
+				rayLine,
+				cursor,
 			};
 		});
 		gripSpace.addEventListener('disconnected', (e) => {

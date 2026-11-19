@@ -613,6 +613,24 @@ export class Lesson {
 		return this.ray.intersectObject(this.continueBtn.userData.plate, false).length > 0;
 	}
 
+	/**
+	 * F3: size each controller's ray line to what it is pointing at and park the cursor dot on
+	 * the hit. Only the active controller drives selection, so the other one shows a short,
+	 * faint stub with no cursor — two full-length lines read as two pointers that both work.
+	 */
+	updatePointers(controllers, active, hitDist) {
+		const idle = this.data.runtime?.rayIdleMetres ?? 1.5;
+		for (const c of [controllers?.left, controllers?.right]) {
+			if (!c?.rayLine) continue;
+			const on = c === active;
+			const len = on ? hitDist ?? idle : 0.15;
+			c.rayLine.scale.z = len;
+			c.rayLine.material.opacity = on ? (hitDist != null ? 0.85 : 0.45) : 0.2;
+			c.cursor.visible = on && hitDist != null;
+			c.cursor.position.z = -len;
+		}
+	}
+
 	/** Per-frame: tweens, hover picking, label billboards. */
 	update(dt, controllers) {
 		for (const tw of this.tweens) {
@@ -629,13 +647,24 @@ export class Lesson {
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
 
 		const ct = controllers?.right || controllers?.left;
+		let hitDist = null;
 		if (ct?.raySpace?.visible) {
 			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 			this.ray.set(o, d);
-			const hit = this.model.pick(this.ray, this.pickOpts());
-			this.hoverPart(hit);
+			// F3: the pointer follows what the trigger will actually land on — the Continue
+			// plate first (it shadows anything behind it), then the part surface under the ray.
+			const plate = this.continueBtn.visible ? this.ray.intersectObject(this.continueBtn.userData.plate, false)[0] : null;
+			if (plate) {
+				this.hoverPart(null);
+				hitDist = plate.distance;
+			} else {
+				const hits = this.model.hitList(this.ray, this.pickOpts());
+				this.hoverPart(this.model.idOfHit(hits[0]) ?? null);
+				if (hits[0]) hitDist = hits[0].distance;
+			}
 		}
+		this.updatePointers(controllers, ct, hitDist);
 
 		if (this.labelGroup.visible) this.updateLabels();
 
