@@ -46,8 +46,8 @@ Hand both links to a colleague and compare them on hardware:
 
 | URL | Built from | Use it for |
 |---|---|---|
-| `https://3dhermit.github.io/webxr-first-steps/` | `main` | **the lesson a class gets.** Treat this branch as "shipped". |
-| `https://3dhermit.github.io/webxr-first-steps/next/` | `anatomy-vr` | a candidate under test — new step, new wording, new asset |
+| `https://3dhermit.github.io/webxr/` | `main` | **the lesson a class gets.** Treat this branch as "shipped". |
+| `https://3dhermit.github.io/webxr/next/` | `anatomy-vr` | a candidate under test — new step, new wording, new asset |
 
 This exists because a free GitHub Pages site has **one** deployment per repo, not one per
 branch. So one workflow builds both copies and publishes a single artifact: `main` at the
@@ -93,8 +93,8 @@ Malformed lesson JSON fails the deploy instead of appearing in front of 28 stude
 
 | URL | Branch | What it is |
 |---|---|---|
-| <https://3dhermit.github.io/webxr-first-steps/> | `main` | the classroom lesson |
-| <https://3dhermit.github.io/webxr-first-steps/next/> | `anatomy-vr` | candidate, for side-by-side testing |
+| <https://3dhermit.github.io/webxr/> | `main` | the classroom lesson |
+| <https://3dhermit.github.io/webxr/next/> | `anatomy-vr` | candidate, for side-by-side testing |
 
 Both come from one workflow and one Pages artifact — see
 [deployment](deployment.md).
