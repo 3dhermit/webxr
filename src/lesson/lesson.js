@@ -198,7 +198,7 @@ export class Lesson {
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
 		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
-		this.continueBtn.position.set(btnX, btnY, panelZ);
+		this.continueBtn.position.set(btnX, btnY - 0.14, panelZ);
 		this.playBtn = makeButton({ label: 'Play video', width: btnW, height: btnW * 0.26 });
 		this.playBtn.position.set(-btnX, btnY, panelZ);
 		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn);
@@ -349,8 +349,8 @@ export class Lesson {
 			out.y = 0;
 			if (out.lengthSq() < 1e-6) out.set(1, 0, 0);
 			out.normalize();
-			const reach = 0.06 + i * 0.012;
-			g.userData.lab.position.set(out.x * reach, 0.03 + (i % 2) * 0.055, out.z * reach);
+			const reach = 0.12 + i * 0.02;
+			g.userData.lab.position.set(out.x * reach, 0.05 + (i % 2) * 0.07, out.z * reach);
 		});
 	}
 
@@ -385,6 +385,7 @@ export class Lesson {
 
 		if (a.isolate) this.model.isolate(a.isolate);
 		if (a.ghost) this.model.ghost(a.ghost);
+		if (a.flow) this.model.forceOpaque();
 		if (a.flow) {
 			this.flow = { i: 0, misses: 0 };
 			this.buildWaypoints();
@@ -431,7 +432,9 @@ export class Lesson {
 		const along = this.model.pickAll(this.ray);
 		this.ray.far = far;
 		const blockers = along.filter((x) => x !== id);
-		if (blockers.length) this.model.ghost(blockers, 0.3);
+		// Step 4 (trace) must stay fully opaque — do not ghost occluders. They still leave
+		// the pick set so the student can point through to the asked part.
+		if (blockers.length && !this.steps[this.i]?.action?.flow) this.model.ghost(blockers, 0.3);
 		// Translucent is not enough: a see-through wall is still solid to a raycast, so the blocker
 		// must also step out of the pick set. Every other part stays pointable, so a wrong answer
 		// still means the student picked a real structure and we can name it back to them.
@@ -717,8 +720,8 @@ export class Lesson {
 		const toEye = (this._lblDir || (this._lblDir = new THREE.Vector3())).copy(eye).sub(at);
 		const d = toEye.length() || 1;
 		toEye.multiplyScalar(1 / d);
-		const label = at.clone().addScaledVector(toEye, Math.min(r + 0.02, d * 0.4));
-		label.y += r * 0.6 + 0.045;
+		const label = at.clone().addScaledVector(toEye, Math.min(r + 0.11, d * 0.5));
+		label.y += r * 0.95 + 0.08;
 		group.position.copy(label);
 		updateLeaderLine(line, at, label);
 	}
@@ -1232,11 +1235,10 @@ export class Lesson {
 			const id = lab.userData.id;
 			const c = this.model.center(id);
 			const d = c.clone().sub(eye);
-			const r = Math.max(0.3, d.length() + 0.12);
+			const r = Math.max(0.48, d.length() + 0.28);
 			items.push({ lab, c, anchorR: this.model.radius(id), r, az: Math.atan2(d.x, -d.z), el: Math.atan2(d.y, Math.hypot(d.x, d.z)) });
 		}
-		// Alternate two shells so neighbouring names do not crowd the same arc.
-		items.sort((a, b) => a.az - b.az).forEach((it, i) => (it.r += i % 2 ? 0.1 : 0));
+		items.sort((a, b) => a.az - b.az).forEach((it, i) => (it.r += i % 2 ? 0.16 : 0));
 		const mean = (k) => items.reduce((s, it) => s + it[k], 0) / items.length;
 		const wantAz = mean('az'), wantEl = mean('el');
 		Lesson.spreadAngles(items, THREE.MathUtils.degToRad(12), THREE.MathUtils.degToRad(6));

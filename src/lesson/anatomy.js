@@ -70,7 +70,8 @@ export class AnatomyModel {
 				0.55,
 			);
 			mesh.material.roughness = 0.55;
-			mesh.material.transparent = true; // needed for ghosting; opacity stays 1
+			mesh.material.transparent = false;
+			mesh.material.opacity = 1;
 			mesh.userData.partId = spec.id;
 
 			inv.copy(mesh.parent.matrixWorld).invert();
@@ -418,8 +419,9 @@ export class AnatomyModel {
 		const keep = new Set(ids);
 		for (const [id, p] of this.parts) {
 			const on = keep.has(id);
-			p.mat.opacity = on ? 1 : contextOpacity;
-			p.mat.depthWrite = on;
+				p.mat.transparent = !on;
+				p.mat.opacity = on ? 1 : contextOpacity;
+				p.mat.depthWrite = on;
 		}
 	}
 
@@ -427,6 +429,7 @@ export class AnatomyModel {
 		for (const id of ids) {
 			const p = this.parts.get(id);
 			if (p) {
+				p.mat.transparent = true;
 				p.mat.opacity = opacity;
 				p.mat.depthWrite = false;
 			}
@@ -435,10 +438,16 @@ export class AnatomyModel {
 
 	clearLook() {
 		for (const p of this.parts.values()) {
+			p.mat.transparent = false;
 			p.mat.opacity = 1;
 			p.mat.depthWrite = true;
 			p.mat.emissive.setHex(0x000000);
 		}
+	}
+
+	/** Step 4: every part is solid. Ghosting leftover from isolate/reveal would stay see-through. */
+	forceOpaque() {
+		this.clearLook();
 	}
 
 	/**
