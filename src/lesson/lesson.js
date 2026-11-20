@@ -120,65 +120,21 @@ export class Lesson {
 	}
 
 	/**
-	 * Place the reading card clear of the anatomy, using the anatomy's measured angular width.
-	 *
-	 * The card used to be hand-placed in metres, and it kept landing on the organ: a 0.28 m card
-	 * at 0.34 m covers ~44 degrees of view while the exploded cloud is ~32 degrees wide, so
-	 * "off to the left by 0.16 m" still overlapped ~14% of the cloud. Here the cloud is measured
-	 * from the student's eye at the widest spread this lesson ever reaches, and the card is put
-	 * outside that band with a gap. Head turns of 25-40 degrees are free in a seated lesson;
-	 * an instruction card printed over the thing being studied is not.
-	 *
-	 * Depth sits just in front of the organ so the text does not float out into the room, and
-	 * text size is specified in degrees, which converts to a fixed pixel height on the lens
-	 * (~18.5 px/deg on Quest 2) regardless of how the model is scaled.
+	 * Instruction card sits on the midline, just in front of the heart (closer to the student
+	 * than the organ at ~0.7 m). Side-of-cloud placement put the starting prompt off in the
+	 * periphery; the first thing they should read is the card in front of the model.
 	 */
 	planUi() {
 		const g = this.uiDeg;
 		const rad = (d) => (d * Math.PI) / 180;
-		const eye = new THREE.Vector3(0, this.ui.eyeY, 0);
-
-		// Measure at the widest disassembly the lesson actually asks for, not blind maximum, so
-		// the card is not pushed further away than the content needs.
-		let maxFactor = 0;
-		for (const s of this.data.steps || []) {
-			const e = s.action?.explode;
-			if (Array.isArray(e)) maxFactor = Math.max(maxFactor, ...e);
-			else if (typeof e === 'number') maxFactor = Math.max(maxFactor, e);
-		}
-		const saved = this.model.factor ?? 0;
-		this.model.setFactor(maxFactor);
-		const a = this.model.angularExtents(eye);
-		this.model.setFactor(saved);
-		this.cloudAngles = {
-			azMin: +((a.azMin * 180) / Math.PI).toFixed(1),
-			azMax: +((a.azMax * 180) / Math.PI).toFixed(1),
-		};
-
-		const gap = rad(g.gap);
+		const p = 0.5;
 		const w = rad(g.width);
-		let side = g.side;
-		// If the chosen side would push the card's outer edge past the comfortable view cone,
-		// flip it rather than shrink the card into unreadability.
-		const edge = (s) => Math.abs((s < 0 ? a.azMin : a.azMax) + s * (gap + w));
-		if (edge(side) > rad(g.maxAz)) side = -side;
-
-		const inner = side < 0 ? a.azMin - gap : a.azMax + gap;
-		const outer = inner + side * w;
-		const p = g.depth;
-		// Cards live on a plane at z = -p. On that plane, azimuth maps to x by tan(), which is
-		// how a degrees spec becomes a position without a second source of truth.
-		const xIn = p * Math.tan(inner);
-		const xOut = p * Math.tan(outer);
-
 		this.ui.panelZ = -p;
-		this.ui.panelX = (xIn + xOut) / 2;
-		this.ui.panelW = Math.abs(xOut - xIn);
+		this.ui.panelX = 0;
+		this.ui.panelW = 2 * p * Math.tan(w / 2);
 		this.ui.promptText = p * Math.tan(rad(g.promptText));
 		this.ui.feedText = p * Math.tan(rad(g.feedText));
-		// Bottom edge pinned below the eye line; the stack grows UP from here (relayout), so a
-		// longer prompt can never extend down across the anatomy.
-		this.ui.panelBottom = this.ui.eyeY + p * Math.tan(rad(g.bottomElev));
+		this.ui.panelBottom = this.ui.eyeY + p * Math.tan(rad(-8));
 		this.ui.btnX = p * Math.tan(rad(g.btnAz));
 		this.ui.btnY = this.ui.eyeY + p * Math.tan(rad(g.btnElev));
 		this.ui.btnW = p * Math.tan(rad(g.btnWidth));
@@ -190,6 +146,14 @@ export class Lesson {
 		// straight through the prompt panel and read as doubled text.
 		this.prompt = new Panel({ width: panelW, fontSize: promptText });
 		this.feedback = new Panel({ width: panelW, fontSize: feedText });
+		for (const pan of [this.prompt, this.feedback]) {
+			pan.back.material.depthTest = false;
+			pan.back.renderOrder = 16;
+			pan.text.material.depthTest = false;
+			pan.text.material.depthWrite = false;
+			pan.text.renderOrder = 17;
+			pan.text.position.z = 0.012;
+		}
 		// troika measures wrapped text asynchronously, so the measured height arrives after set().
 		// Re-anchor the stack each time a panel is remeasured, or the backdrop keeps the previous
 		// prompt's height and the extra lines spill off it onto the model.
@@ -603,6 +567,13 @@ export class Lesson {
 		this.feedback.group.position.y = b + fh;
 		this.prompt.group.position.y = b + fh + gap + ph;
 		this.panelBottomY = b;
+		for (const pan of [this.prompt, this.feedback]) {
+			pan.text.material.depthTest = false;
+			pan.text.material.depthWrite = false;
+			pan.text.renderOrder = 17;
+			pan.back.material.depthTest = false;
+			pan.back.renderOrder = 16;
+		}
 	}
 
 	setContinueEnabled(on) {
