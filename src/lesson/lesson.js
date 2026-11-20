@@ -203,19 +203,13 @@ export class Lesson {
 		this.playBtn.position.set(-btnX, btnY, panelZ);
 		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn);
 
-		this.quizBtns = [];
-		for (let i = 0; i < 4; i++) {
-			const b = makeButton({ label: `  `, width: btnW * 1.15, height: btnW * 0.24 });
-			b.visible = false;
-			this.root.add(b);
-			this.quizBtns.push(b);
-		}
 		this.quiz = null;
 		this._quizDone = false;
+		this.buildQuizHud();
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn, ...this.quizBtns];
+		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn];
 		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
 
 		// World-locked lecture clip. Not tied to a step: the Play video plate is always available.
@@ -226,6 +220,69 @@ export class Lesson {
 			runtime: this.data.runtime || {},
 		});
 		this.videoHover = null;
+	}
+
+	/**
+	 * Head-locked quiz overlay. Parent is the XR camera so the card inherits yaw/pitch/roll
+	 * with zero lag — no world position, no billboard copy, no lerp. 0.6 m in front of the
+	 * eye (inside 0.5–0.7 m); camera near is 0.1 m so it does not clip. Type is sized for
+	 * Quest 2 (~18.5 px/deg): heading 32 px, body 24 px.
+	 */
+	buildQuizHud() {
+		const dist = 0.6;
+		const px = (pxSize) => dist * Math.tan(((pxSize / 18.5) * Math.PI) / 180);
+		this.quizDist = dist;
+		this.quizHud = new THREE.Group();
+		this.quizHud.position.set(0, 0, -dist);
+		this.quizHud.visible = false;
+		this.camera.add(this.quizHud);
+
+		const cardW = 0.36;
+		this.quizBack = new THREE.Mesh(
+			new THREE.PlaneGeometry(cardW, 0.32),
+			new THREE.MeshBasicMaterial({
+				color: 0x101418,
+				transparent: true,
+				opacity: 0.92,
+				depthTest: false,
+				depthWrite: false,
+			}),
+		);
+		this.quizBack.position.z = -0.006;
+		this.quizBack.renderOrder = 30;
+		this.quizBack.raycast = () => {};
+
+		this.quizTitle = makeText({
+			fontSize: px(32),
+			maxWidth: cardW - 0.04,
+			anchorX: 'center',
+			anchorY: 'bottom',
+			align: 'center',
+			color: 0xffffff,
+		});
+		this.quizBody = makeText({
+			fontSize: px(24),
+			maxWidth: cardW - 0.04,
+			anchorX: 'center',
+			anchorY: 'top',
+			align: 'center',
+			color: 0xf2f2f2,
+		});
+		this.quizTitle.position.set(0, 0.1, 0);
+		this.quizBody.position.set(0, 0.088, 0);
+		this.quizHud.add(this.quizBack, this.quizTitle, this.quizBody);
+
+		this.quizBtns = [];
+		const bw = 0.155;
+		const bh = 0.042;
+		for (let i = 0; i < 4; i++) {
+			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(24) });
+			b.userData.plate.material = new THREE.MeshBasicMaterial({ color: 0x2f6fb3, depthTest: false, depthWrite: false });
+			b.userData.plate.renderOrder = 31;
+			b.visible = false;
+			this.quizHud.add(b);
+			this.quizBtns.push(b);
+		}
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -490,14 +547,18 @@ export class Lesson {
 		this.setContinueEnabled(false);
 		this.continueBtn.visible = false;
 		this.playBtn.visible = false;
+		this.prompt.group.visible = false;
+		this.feedback.group.visible = false;
 		this.labelGroup.visible = false;
 		this.lineGroup.visible = false;
 		this.waypointGroup.visible = false;
 		this.showHoverName(null);
 		this.clearSelected();
 		const title = item.title || `Quiz ${n + 1}`;
-		this.prompt.set(`${title}\n\n${item.q}`);
-		this.say('');
+		this.quizTitle.text = title;
+		this.quizTitle.sync();
+		this.quizBody.text = item.q;
+		this.quizBody.sync();
 		this.placeQuizBtns();
 		item.choices.forEach((c, i) => {
 			const b = this.quizBtns[i];
@@ -506,26 +567,30 @@ export class Lesson {
 			b.userData.caption.sync();
 			b.visible = true;
 		});
-		this.relayout();
+		this.quizHud.visible = true;
 		return true;
 	}
 
-	/** Quiz plates live on the instruction card, never over the heart. */
+	/** Choice plates in camera-local space, under the question, never in world space. */
 	placeQuizBtns() {
-		const { panelX, panelZ, panelW, panelBottom } = this.ui;
-		const h = (this.quizBtns[0]?.userData.plate.geometry.parameters.height || 0.04) + 0.01;
+		const bw = 0.155;
+		const bh = 0.042;
+		const gap = 0.012;
 		this.quizBtns.forEach((b, i) => {
 			const col = i % 2;
 			const row = Math.floor(i / 2);
-			b.position.set(panelX + (col ? 1 : -1) * panelW * 0.26, panelBottom - 0.045 - row * h, panelZ);
+			b.position.set((col ? 1 : -1) * (bw / 2 + gap), -0.055 - row * (bh + gap), 0.002);
 		});
 	}
 
 	hideQuiz() {
 		this.quiz = null;
+		this.quizHud.visible = false;
 		for (const b of this.quizBtns || []) b.visible = false;
 		this.continueBtn.visible = true;
 		this.playBtn.visible = true;
+		this.prompt.group.visible = true;
+		this.feedback.group.visible = true;
 		const a = this.steps[this.i]?.action || {};
 		this.labelGroup.visible = a.labels === 'core' || Array.isArray(a.labels);
 		this.lineGroup.visible = this.labelGroup.visible;
@@ -837,6 +902,7 @@ export class Lesson {
 			this.selGroup,
 			this.selLine,
 			this.model.group,
+			this.quizHud,
 		];
 	}
 
