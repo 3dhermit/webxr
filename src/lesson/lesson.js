@@ -4,7 +4,7 @@
  * Nothing is stored — the classroom rule is formative feedback only, no records, no accounts.
  */
 import * as THREE from 'three';
-import { Panel, makeButton, makeLabel, makeLeaderLine, makeText, updateLeaderLine } from './text.js';
+import { Panel, makeButton, makeLabel, makeLeaderLine, makeText, setButtonLabel, updateLeaderLine } from './text.js';
 import { VideoScreen } from './video.js';
 
 const OK = 0x8fe3a0;
@@ -23,12 +23,14 @@ function drawOnTop(label, line) {
 }
 
 export class Lesson {
-	constructor({ player, camera, renderer, model, data, level, debug = false }) {
+	constructor({ player, camera, renderer, model, data, level, debug = false, sky = null }) {
 		this.player = player;
 		this.camera = camera;
 		this.renderer = renderer;
 		this.model = model;
 		this.data = data;
+		this.sky = sky;
+		this.passthrough = false;
 		this.level = level || data.defaultLevel || 'hs';
 		this.debug = debug;
 
@@ -204,7 +206,9 @@ export class Lesson {
 		this.hudBtns.position.set(0, 0, -0.5);
 		this.continueBtn.position.set(0.13, -0.18, 0);
 		this.playBtn.position.set(-0.13, -0.18, 0);
-		this.hudBtns.add(this.continueBtn, this.playBtn);
+		this.passBtn = makeButton({ label: 'Passthrough', width: btnW, height: btnW * 0.26 });
+		this.passBtn.position.set(0, -0.12, 0);
+		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn);
 		this.camera.add(this.hudBtns);
 		this.root.add(this.prompt.group, this.feedback.group);
 
@@ -555,6 +559,7 @@ export class Lesson {
 		this.setContinueEnabled(false);
 		this.continueBtn.visible = false;
 		this.playBtn.visible = false;
+		if (this.passBtn) this.passBtn.visible = false;
 		this.prompt.group.visible = false;
 		this.feedback.group.visible = false;
 		this.labelGroup.visible = false;
@@ -597,6 +602,7 @@ export class Lesson {
 		for (const b of this.quizBtns || []) b.visible = false;
 		this.continueBtn.visible = true;
 		this.playBtn.visible = true;
+		if (this.passBtn) this.passBtn.visible = true;
 		this.prompt.group.visible = true;
 		this.feedback.group.visible = true;
 		const a = this.steps[this.i]?.action || {};
@@ -902,6 +908,7 @@ export class Lesson {
 			this.feedback.group,
 			this.continueBtn,
 			this.playBtn,
+			this.passBtn,
 			this.hudBtns,
 			this.labelGroup,
 			this.lineGroup,
@@ -1027,7 +1034,13 @@ export class Lesson {
 		return this.lastHand;
 	}
 
-	/** Aim this.ray along a controller. */
+	togglePassthrough() {
+		this.passthrough = !this.passthrough;
+		if (this.sky) this.sky.visible = !this.passthrough;
+		setButtonLabel(this.passBtn, this.passthrough ? '360 sky' : 'Passthrough');
+		return true;
+	}
+
 	aim(ct) {
 		if (!ct?.raySpace?.visible) return false;
 		const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
@@ -1040,6 +1053,7 @@ export class Lesson {
 		if (this.continueBtn.visible && this.ray.intersectObject(this.continueBtn.userData.plate, false).length)
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(this.playBtn.userData.plate, false).length) return 'play';
+		if (this.passBtn?.visible && this.ray.intersectObject(this.passBtn.userData.plate, false).length) return 'pass';
 		if (this.quiz) {
 			for (let i = 0; i < this.quizBtns.length; i++) {
 				const b = this.quizBtns[i];
@@ -1068,6 +1082,10 @@ export class Lesson {
 		}
 		if (ui === 'play') {
 			const hit = this.ray.intersectObject(this.playBtn.userData.plate, false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'pass') {
+			const hit = this.ray.intersectObject(this.passBtn.userData.plate, false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui && ui.startsWith('quiz-')) {

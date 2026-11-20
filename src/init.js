@@ -13,7 +13,6 @@ import { DevUI } from '@iwer/devui';
 import { GamepadWrapper } from 'gamepad-wrapper';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
 export async function init(setupScene = () => {}, onFrame = () => {}) {
@@ -49,7 +48,7 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 	document.body.appendChild(container);
 
 	const scene = new THREE.Scene();
-	scene.background = new THREE.Color(0x808080);
+	scene.background = null;
 
 	const camera = new THREE.PerspectiveCamera(
 		50,
@@ -63,10 +62,12 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 	controls.target.set(0, 1.6, 0);
 	controls.update();
 
-	const renderer = new THREE.WebGLRenderer({ antialias: true });
+	const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 	renderer.setPixelRatio(window.devicePixelRatio);
 	renderer.setSize(window.innerWidth, window.innerHeight);
+	renderer.setClearColor(0x000000, 0);
 	renderer.xr.enabled = true;
+	renderer.xr.setReferenceSpaceType('local-floor');
 	container.appendChild(renderer.domElement);
 
 	const environment = new RoomEnvironment(renderer);
@@ -146,6 +147,8 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 		controls,
 	};
 
+	const sky = await loadSky(scene);
+	globals.sky = sky;
 	setupScene(globals);
 
 	const clock = new THREE.Clock();
@@ -163,5 +166,73 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 
 	renderer.setAnimationLoop(animate);
 
-	document.body.appendChild(VRButton.createButton(renderer));
+	document.body.appendChild(makeXRButton(renderer));
+}
+
+/** Equirect 360 as a sky sphere so hiding it reveals Quest passthrough in immersive-ar. */
+async function loadSky(scene) {
+	try {
+		const tex = await new THREE.TextureLoader().loadAsync('assets/env/ymax-360.png');
+		tex.mapping = THREE.EquirectangularReflectionMapping;
+		tex.colorSpace = THREE.SRGBColorSpace;
+		tex.anisotropy = 4;
+		const sky = new THREE.Mesh(
+			new THREE.SphereGeometry(40, 48, 24),
+			new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, depthWrite: false }),
+		);
+		sky.name = 'envSky';
+		sky.renderOrder = -1;
+		sky.raycast = () => {};
+		scene.add(sky);
+		return sky;
+	} catch (err) {
+		console.warn('360 environment failed to load', err);
+		return null;
+	}
+}
+
+/**
+ * ENTER XR: prefer immersive-ar on Quest so passthrough is available; fall back to VR.
+ * https://threejs.org/docs/WebXRManager.html
+ */
+function makeXRButton(renderer) {
+	const btn = document.createElement('button');
+	Object.assign(btn.style, {
+		position: 'absolute',
+		left: 'calc(50% - 75px)',
+		bottom: '20px',
+		width: '150px',
+		padding: '12px',
+		border: '1px solid #fff',
+		borderRadius: '4px',
+		background: 'rgba(0,0,0,0.5)',
+		color: '#fff',
+		font: 'bold 13px sans-serif',
+		cursor: 'pointer',
+		zIndex: '999',
+	});
+	btn.textContent = 'ENTER VR';
+	const sync = () => {
+		btn.textContent = renderer.xr.isPresenting ? 'EXIT XR' : 'ENTER VR';
+	};
+	btn.addEventListener('click', async () => {
+		if (renderer.xr.getSession()) {
+			renderer.xr.getSession().end();
+			return;
+		}
+		if (!navigator.xr) return;
+		let mode = 'immersive-vr';
+		try {
+			if (await navigator.xr.isSessionSupported('immersive-ar')) mode = 'immersive-ar';
+		} catch {
+			/* desktop / emulator */
+		}
+		const session = await navigator.xr.requestSession(mode, {
+			optionalFeatures: ['local-floor', 'bounded-floor'],
+		});
+		await renderer.xr.setSession(session);
+	});
+	renderer.xr.addEventListener('sessionstart', sync);
+	renderer.xr.addEventListener('sessionend', sync);
+	return btn;
 }

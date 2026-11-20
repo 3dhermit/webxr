@@ -45,6 +45,7 @@ async function boot() {
 		data: lessonData,
 		level: params.get('level') || undefined,
 		debug: DEBUG,
+		sky: g.sky,
 	});
 	g.player.add(lesson.root);
 
@@ -61,8 +62,8 @@ async function boot() {
 	}
 }
 
-function setupScene({ scene, camera, renderer, player, controllers, controls }) {
-	g = { scene, camera, renderer, player, controllers, controls };
+function setupScene({ scene, camera, renderer, player, controllers, controls, sky }) {
+	g = { scene, camera, renderer, player, controllers, controls, sky };
 
 	// On a monitor, put the preview camera where a student's head will be, so what the developer
 	// sees is what the class sees. In the headset XR drives the camera, so OrbitControls is off.
@@ -115,6 +116,7 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			else if (e.key === 'ArrowLeft') lesson.prev();
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
 			else if (e.key === 'v') lesson.video?.isOpen ? lesson.closeVideo() : lesson.openVideo();
+			else if (e.key === 'p') lesson.togglePassthrough();
 			else if (e.key === 'r') lesson.reset();
 		});
 	}
@@ -138,6 +140,7 @@ function onFrame(delta, _time, globals) {
 		if (lesson.done) lesson.reset();
 		else if (ui === 'continue') lesson.next();
 		else if (ui === 'play') lesson.openVideo();
+		else if (ui === 'pass') lesson.togglePassthrough();
 		else if (typeof ui === 'string' && ui.startsWith('quiz-')) lesson.answerQuiz(+ui.slice(5));
 		else lesson.select(lesson.hover);
 	}
