@@ -490,22 +490,35 @@ export class Lesson {
 		this.setContinueEnabled(false);
 		this.continueBtn.visible = false;
 		this.playBtn.visible = false;
+		this.labelGroup.visible = false;
+		this.lineGroup.visible = false;
+		this.waypointGroup.visible = false;
+		this.showHoverName(null);
+		this.clearSelected();
 		const title = item.title || `Quiz ${n + 1}`;
 		this.prompt.set(`${title}\n\n${item.q}`);
 		this.say('');
-		const { btnY, btnW, panelZ } = this.ui;
+		this.placeQuizBtns();
 		item.choices.forEach((c, i) => {
 			const b = this.quizBtns[i];
 			if (!b) return;
 			b.userData.caption.text = c;
 			b.userData.caption.sync();
 			b.visible = true;
-			const col = i % 2;
-			const row = Math.floor(i / 2);
-			b.position.set((col ? 1 : -1) * btnW * 0.7, btnY + 0.12 - row * (btnW * 0.3), panelZ);
 		});
 		this.relayout();
 		return true;
+	}
+
+	/** Quiz plates live on the instruction card, never over the heart. */
+	placeQuizBtns() {
+		const { panelX, panelZ, panelW, panelBottom } = this.ui;
+		const h = (this.quizBtns[0]?.userData.plate.geometry.parameters.height || 0.04) + 0.01;
+		this.quizBtns.forEach((b, i) => {
+			const col = i % 2;
+			const row = Math.floor(i / 2);
+			b.position.set(panelX + (col ? 1 : -1) * panelW * 0.26, panelBottom - 0.045 - row * h, panelZ);
+		});
 	}
 
 	hideQuiz() {
@@ -513,6 +526,10 @@ export class Lesson {
 		for (const b of this.quizBtns || []) b.visible = false;
 		this.continueBtn.visible = true;
 		this.playBtn.visible = true;
+		const a = this.steps[this.i]?.action || {};
+		this.labelGroup.visible = a.labels === 'core' || Array.isArray(a.labels);
+		this.lineGroup.visible = this.labelGroup.visible;
+		this.waypointGroup.visible = !!a.flow;
 	}
 
 	answerQuiz(i) {
