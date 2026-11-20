@@ -205,7 +205,8 @@
           "UBERON:0002080",
           "UBERON:0002084"
         ],
-        "hoverNames": true
+        "hoverNames": true,
+        "quiz": 0
       },
       "why": "Exploding is the model-building move HS-LS1-2 asks for; narrating while doing it is self-explanation, which is what makes the manipulation stick."
     },
@@ -227,7 +228,8 @@
           "UBERON:0002080"
         ],
         "explode": 0.25,
-        "hoverNames": true
+        "hoverNames": true,
+        "quiz": 1
       },
       "why": "Structure–function reasoning is the transferable idea; the wall-thickness contrast is the visible evidence for it."
     },
@@ -245,7 +247,8 @@
         "flow": true,
         "explode": 1,
         "labels": "none",
-        "hoverNames": true
+        "hoverNames": true,
+        "quiz": 2
       },
       "why": "Ordering the components is the systems-model claim itself, and it is the first retrieval practice in the lesson."
     },
@@ -263,7 +266,8 @@
         "reassemble": true,
         "labels": "none",
         "explode": 1,
-        "hoverNames": true
+        "hoverNames": true,
+        "quiz": 3
       },
       "why": "Cold naming after labels are removed is retrieval practice; it is the part that produces durable memory, and it is also the formative check the student sees instantly."
     }
@@ -352,6 +356,7 @@
   "quiz": [
     {
       "q": "Which valve separates the left atrium from the left ventricle?",
+      "title": "Quiz 1",
       "choices": [
         "Mitral valve",
         "Tricuspid valve",
@@ -364,6 +369,7 @@
     },
     {
       "q": "Which lists the valves in the order blood passes through them, from the vena cava onward?",
+      "title": "Quiz 2",
       "choices": [
         "Tricuspid, pulmonary, mitral, aortic",
         "Mitral, pulmonary, tricuspid, aortic",
@@ -376,6 +382,7 @@
     },
     {
       "q": "Which chamber first receives blood returning from the body?",
+      "title": "Quiz 3",
       "choices": [
         "Right atrium",
         "Left atrium",
@@ -388,6 +395,7 @@
     },
     {
       "q": "In which chamber would you find the thickest myocardium?",
+      "title": "Quiz 4",
       "choices": [
         "Left ventricle",
         "Right ventricle",
@@ -431,6 +439,16 @@
     "Anatomy model: HuBMAP Human Reference Atlas, \"Reference organ — heart, male\" (v1.3), CC BY 4.0 — https://purl.humanatlas.io/ref-organ/heart-male/v1.3",
     "Physiology content adapted from OpenStax, Anatomy and Physiology (Rice University), Ch. 19 — CC BY 4.0."
   ],
+  "videos": {
+    "anatoge-capture": {
+      "src": "assets/videos/anatoge-capture.mp4",
+      "title": "Anatomage walkthrough",
+      "start": 0,
+      "aspect": 1.7778,
+      "loop": false,
+      "muted": false
+    }
+  },
   "names": {
     "UBERON:0002078": "Right atrium",
     "UBERON:0002079": "Left atrium",

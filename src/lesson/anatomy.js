@@ -281,6 +281,8 @@ export class AnatomyModel {
 		const p = this.parts.get(id);
 		if (!p) return null;
 		p.held = true;
+		p.snapFrom = null;
+		p.snapWait = 0;
 		if (p.action) p.action.enabled = false;
 		return {
 			pos: p.mesh.getWorldPosition(new THREE.Vector3()),
@@ -326,11 +328,50 @@ export class AnatomyModel {
 			p.moved = null;
 			p.turned = false;
 			p.held = false;
+			p.snapFrom = null;
+			p.snapWait = 0;
 			if (p.action) p.action.enabled = true;
 			if (p.homeQuat) p.mesh.quaternion.copy(p.homeQuat);
 		}
 		this.apply();
 		return n;
+	}
+
+	/** After a grab on step 5: wait, then ease the part home. */
+	scheduleSnap(id, wait = 5, dur = 1.8) {
+		const p = this.parts.get(id);
+		if (!p) return false;
+		p.snapWait = wait;
+		p.snapDur = dur;
+		p.snapT = 0;
+		p.snapFrom = (p.moved || new THREE.Vector3()).clone();
+		p.snapFromQuat = p.mesh.quaternion.clone();
+		return true;
+	}
+
+	tickSnaps(dt) {
+		let dirty = false;
+		for (const p of this.parts.values()) {
+			if (p.held || !p.snapFrom) continue;
+			if (p.snapWait > 0) {
+				p.snapWait -= dt;
+				continue;
+			}
+			p.snapT += dt;
+			const k = Math.min(1, p.snapT / (p.snapDur || 1.8));
+			const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+			p.moved = p.snapFrom.clone().multiplyScalar(1 - e);
+			if (p.homeQuat && p.snapFromQuat) p.mesh.quaternion.slerpQuaternions(p.snapFromQuat, p.homeQuat, e);
+			p.turned = true;
+			dirty = true;
+			if (k >= 1) {
+				p.moved = null;
+				p.turned = false;
+				p.snapFrom = null;
+				if (p.homeQuat) p.mesh.quaternion.copy(p.homeQuat);
+			}
+		}
+		if (dirty) this.apply();
 	}
 
 	setFactor(f) {

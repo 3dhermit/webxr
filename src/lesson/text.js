@@ -173,3 +173,12 @@ export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02
 	g.userData.caption = caption;
 	return g;
 }
+
+/** Change a makeButton caption in place (Mute / Unmute / Sound on). */
+export function setButtonLabel(btn, label) {
+	const cap = btn?.userData?.caption;
+	if (!cap) return btn;
+	cap.text = label;
+	cap.sync();
+	return btn;
+}

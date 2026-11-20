@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { Panel, makeButton, makeLabel, makeLeaderLine, makeText, updateLeaderLine } from './text.js';
+import { VideoScreen } from './video.js';
 
 const OK = 0x8fe3a0;
 const BAD = 0xff9a8a;
@@ -198,12 +199,33 @@ export class Lesson {
 		// apparent size on the lens when the card moves closer to or further from the face.
 		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
 		this.continueBtn.position.set(btnX, btnY, panelZ);
-		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn);
+		this.playBtn = makeButton({ label: 'Play video', width: btnW, height: btnW * 0.26 });
+		this.playBtn.position.set(-btnX, btnY, panelZ);
+		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn);
+
+		this.quizBtns = [];
+		for (let i = 0; i < 4; i++) {
+			const b = makeButton({ label: `  `, width: btnW * 1.15, height: btnW * 0.24 });
+			b.visible = false;
+			this.root.add(b);
+			this.quizBtns.push(b);
+		}
+		this.quiz = null;
+		this._quizDone = false;
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn];
+		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn, ...this.quizBtns];
 		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
+
+		// World-locked lecture clip. Not tied to a step: the Play video plate is always available.
+		this.video = new VideoScreen({
+			camera: this.camera,
+			parent: this.player,
+			videos: this.data.videos || {},
+			runtime: this.data.runtime || {},
+		});
+		this.videoHover = null;
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -227,6 +249,7 @@ export class Lesson {
 			this.lineGroup.add(lab.userData.line);
 			lab.userData.text.text = this.partName(id);
 			lab.userData.text.sync();
+			drawOnTop(lab, lab.userData.line);
 		}
 	}
 
@@ -244,6 +267,7 @@ export class Lesson {
 			lab.userData.text.text = hop.label;
 			lab.userData.text.sync();
 			g.add(dot, lab);
+			drawOnTop(lab, { material: { transparent: true, depthTest: false, depthWrite: false }, renderOrder: 19 });
 			g.userData.hop = hop;
 			g.userData.dot = dot;
 			g.userData.lab = lab;
@@ -285,6 +309,9 @@ export class Lesson {
 		const a = st.action || {};
 
 		this.grabEnd();
+		this._leave = null;
+		this.hideQuiz();
+		this._quizDone = false;
 		this.model.returnMoved();
 		this.clearSelected();
 		this.model.clearLook();
@@ -442,12 +469,81 @@ export class Lesson {
 
 	next() {
 		if (!this.continueOn) return false;
-		if (this.i >= this.steps.length - 1) {
-			this.finish();
+		if (this._leave) return false;
+		if (this.quiz) return false;
+		const qIndex = this.steps[this.i]?.action?.quiz;
+		if (Number.isInteger(qIndex) && !this._quizDone) {
+			this.showQuiz(qIndex);
 			return true;
 		}
-		this.enterStep(this.i + 1);
+		this.beginLeave(() => {
+			if (this.i >= this.steps.length - 1) this.finish();
+			else this.enterStep(this.i + 1);
+		});
 		return true;
+	}
+
+	showQuiz(n) {
+		const item = (this.data.quiz || [])[n];
+		if (!item) return false;
+		this.quiz = { n, item };
+		this.setContinueEnabled(false);
+		this.continueBtn.visible = false;
+		this.playBtn.visible = false;
+		const title = item.title || `Quiz ${n + 1}`;
+		this.prompt.set(`${title}\n\n${item.q}`);
+		this.say('');
+		const { btnY, btnW, panelZ } = this.ui;
+		item.choices.forEach((c, i) => {
+			const b = this.quizBtns[i];
+			if (!b) return;
+			b.userData.caption.text = c;
+			b.userData.caption.sync();
+			b.visible = true;
+			const col = i % 2;
+			const row = Math.floor(i / 2);
+			b.position.set((col ? 1 : -1) * btnW * 0.7, btnY + 0.12 - row * (btnW * 0.3), panelZ);
+		});
+		this.relayout();
+		return true;
+	}
+
+	hideQuiz() {
+		this.quiz = null;
+		for (const b of this.quizBtns || []) b.visible = false;
+		this.continueBtn.visible = true;
+		this.playBtn.visible = true;
+	}
+
+	answerQuiz(i) {
+		if (!this.quiz) return false;
+		const { item, n } = this.quiz;
+		if (i === item.answer) {
+			this.say(`Quiz ${n + 1} — correct. ${item.why}`, OK);
+			this._quizDone = true;
+			this.hideQuiz();
+			this.beginLeave(() => {
+				if (this.i >= this.steps.length - 1) this.finish();
+				else this.enterStep(this.i + 1);
+			});
+			return true;
+		}
+		this.say(`Quiz ${n + 1} — not that one. ${item.why}`, BAD);
+		return false;
+	}
+
+	beginLeave(done) {
+		this.grabEnd();
+		this.setContinueEnabled(false);
+		const fromMoved = new Map();
+		for (const [id, p] of this.model.parts) {
+			fromMoved.set(id, {
+				moved: p.moved ? p.moved.clone() : null,
+				quat: p.mesh.quaternion.clone(),
+			});
+			p.snapFrom = null;
+		}
+		this._leave = { t: 0, dur: 1.4, from: this.model.factor, fromMoved, done };
 	}
 
 	prev() {
@@ -483,6 +579,7 @@ export class Lesson {
 		this.grabEnd();
 		this.model.returnMoved();
 		this.clearSelected();
+		if (this.video?.isOpen) this.closeVideo();
 		if (this.hover) this.model.highlight(this.hover, false);
 		this.hover = null;
 		this.showHoverName(null);
@@ -705,12 +802,80 @@ export class Lesson {
 		if (this.onEvent) this.onEvent(kind);
 	}
 
+	defaultVideoId() {
+		return Object.keys(this.data.videos || {})[0] || null;
+	}
+
+	videoMaskTargets() {
+		return [
+			this.prompt.group,
+			this.feedback.group,
+			this.continueBtn,
+			this.playBtn,
+			this.labelGroup,
+			this.lineGroup,
+			this.waypointGroup,
+			this.hovGroup,
+			this.hovLine,
+			this.selGroup,
+			this.selLine,
+			this.model.group,
+		];
+	}
+
+	hideForVideo() {
+		this._maskBackup = this.videoMaskTargets().map((o) => [o, o.visible]);
+		for (const o of this.videoMaskTargets()) o.visible = false;
+	}
+
+	restoreAfterVideo() {
+		if (!this._maskBackup) return;
+		for (const [o, vis] of this._maskBackup) o.visible = vis;
+		this._maskBackup = null;
+	}
+
+	openVideo(id, at) {
+		const clip = id || this.defaultVideoId();
+		if (!this.video.open(clip, at)) return false;
+		this.hideForVideo();
+		this.fire('video-open', clip);
+		return true;
+	}
+
+	closeVideo() {
+		if (!this.video.close()) return false;
+		this.restoreAfterVideo();
+		this.videoHover = null;
+		this.fire('video-close');
+		return true;
+	}
+
+	/** Trigger while the clip is up: Close, Mute, or swallow presses on the panel. */
+	pressVideo() {
+		if (!this.video.isOpen) return false;
+		if (this.videoHover === 'close') return this.closeVideo();
+		if (this.videoHover === 'play') return this.video.play();
+		if (this.videoHover === 'pause') return this.video.pause();
+		if (this.videoHover === 'scrub') {
+			const u = this.video.pickScrub(this.ray)?.u;
+			if (u != null) this.video.seekToFraction(u);
+			return true;
+		}
+		return true;
+	}
+
+	setVideoBtn(btn, on) {
+		const plate = btn?.userData?.plate;
+		if (plate) plate.material.color.setHex(on ? 0x4a90d9 : 0x2f6fb3);
+	}
+
 	/**
 	 * Squeeze pressed: take hold of whatever the pointer is on.
 	 * Trigger stays select/advance so the two verbs never collide.
 	 */
 	grabStart(hand, controllers, via = 'squeeze') {
 		if (this.grab) return false;
+		if (this.video?.isOpen) return false;
 		const id = this.hover;
 		if (!id) return false;
 		const ct = controllers?.[hand];
@@ -741,6 +906,7 @@ export class Lesson {
 		this.model.endGrab(id);
 		this.model.highlight(id, false);
 		this.grab = null;
+		if (this.steps[this.i]?.id === 's5-retrieve') this.model.scheduleSnap(id, 5, 1.8);
 		this.fire('grab-end', id);
 		return true;
 	}
@@ -769,43 +935,86 @@ export class Lesson {
 		return this.lastHand;
 	}
 
-	/** Is the controller ray currently on the Continue plate? */
-	pickButton(controllers) {
+	/** Which UI plate the ray is on: 'continue', 'play', or null. */
+	pickUi(controllers) {
 		const ct = controllers?.right || controllers?.left;
-		if (!ct?.raySpace?.visible) return false;
+		if (!ct?.raySpace?.visible) return null;
 		const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 		const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 		this.ray.set(o, d);
-		return this.ray.intersectObject(this.continueBtn.userData.plate, false).length > 0;
+		if (this.continueBtn.visible && this.ray.intersectObject(this.continueBtn.userData.plate, false).length)
+			return 'continue';
+		if (this.playBtn.visible && this.ray.intersectObject(this.playBtn.userData.plate, false).length) return 'play';
+		if (this.quiz) {
+			for (let i = 0; i < this.quizBtns.length; i++) {
+				const b = this.quizBtns[i];
+				if (b.visible && this.ray.intersectObject(b.userData.plate, false).length) return `quiz-${i}`;
+			}
+		}
+		return null;
+	}
+
+	/** Is the controller ray currently on the Continue plate? */
+	pickButton(controllers) {
+		return this.pickUi(controllers) === 'continue';
 	}
 
 	/**
-	 * F3: size each controller's ray line to what it is pointing at and park the cursor dot on
-	 * the hit. Only the active controller drives selection, so the other one shows a short,
-	 * faint stub with no cursor — two full-length lines read as two pointers that both work.
+	 * Both controllers get a full ray and a cursor dot at the tip. An idle stub with no
+	 * cursor on the off hand reads as a dead pointer.
 	 */
-	updatePointers(controllers, active, hitDist) {
+	updatePointers(controllers, active, hitDist, perHand) {
 		const idle = this.data.runtime?.rayIdleMetres ?? 1.5;
-		for (const c of [controllers?.left, controllers?.right]) {
+		for (const hand of ['left', 'right']) {
+			const c = controllers?.[hand];
 			if (!c?.rayLine) continue;
+			const own = perHand?.[hand]?.dist;
 			const on = c === active;
-			const len = on ? hitDist ?? idle : 0.15;
+			const len = own ?? (on ? hitDist : null) ?? idle;
 			c.rayLine.scale.z = len;
-			c.rayLine.material.opacity = on ? (hitDist != null ? 0.85 : 0.45) : 0.2;
-			c.cursor.visible = on && hitDist != null;
+			c.rayLine.material.opacity = on ? 0.85 : 0.5;
+			c.cursor.visible = true;
 			c.cursor.position.z = -len;
 		}
 	}
 
 	/** Per-frame: tweens, hover picking, label billboards. */
 	update(dt, controllers) {
-		for (const tw of this.tweens) {
-			tw.t += dt;
-			const k = Math.min(1, tw.t / tw.dur);
-			const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
-			this.model.setFactor(tw.from + (tw.to - tw.from) * e);
+		if (!this._leave) {
+			for (const tw of this.tweens) {
+				tw.t += dt;
+				const k = Math.min(1, tw.t / tw.dur);
+				const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+				this.model.setFactor(tw.from + (tw.to - tw.from) * e);
+			}
+			this.tweens = this.tweens.filter((tw) => tw.t < tw.dur);
 		}
-		this.tweens = this.tweens.filter((tw) => tw.t < tw.dur);
+
+		if (this._leave) {
+			const lv = this._leave;
+			lv.t += dt;
+			const k = Math.min(1, lv.t / lv.dur);
+			const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+			this.model.setFactor(lv.from * (1 - e));
+			for (const [id, rec] of lv.fromMoved) {
+				const p = this.model.parts.get(id);
+				if (!p) continue;
+				p.moved = rec.moved ? rec.moved.clone().multiplyScalar(1 - e) : null;
+				if (p.homeQuat) p.mesh.quaternion.slerpQuaternions(rec.quat, p.homeQuat, e);
+				p.turned = true;
+			}
+			this.model.apply();
+			if (k >= 1) {
+				this.model.returnMoved();
+				const done = lv.done;
+				this._leave = null;
+				done?.();
+			}
+		} else {
+			this.model.tickSnaps(dt);
+		}
+
+		if (this.video?.isOpen) this.video.update(dt);
 
 		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
 		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed
@@ -818,9 +1027,31 @@ export class Lesson {
 			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 			this.ray.set(o, d);
+			if (this.video?.isOpen) {
+				this.hoverPart(null);
+				const close = this.video.pickClose(this.ray);
+				const play = this.video.pickPlay(this.ray);
+				const pause = this.video.pickPause(this.ray);
+				const scrub = this.video.pickScrub(this.ray);
+				this.videoHover = close ? 'close' : play ? 'play' : pause ? 'pause' : scrub ? 'scrub' : this.video.pickPanel(this.ray) ? 'panel' : null;
+				this.setVideoBtn(this.video.closeBtn, this.videoHover === 'close');
+				this.setVideoBtn(this.video.playCtl, this.videoHover === 'play');
+				this.setVideoBtn(this.video.pauseCtl, this.videoHover === 'pause');
+				if (this.video.scrubbing) {
+					const u = this.video.scrubUFromRay(this.ray);
+					if (u != null) this.video.scrubTo(u);
+				}
+				hitDist = close?.distance ?? play?.distance ?? pause?.distance ?? scrub?.distance ?? this.video.pickPanel(this.ray)?.distance ?? null;
+			} else {
 			// F3: the pointer follows what the trigger will actually land on — the Continue
 			// plate first (it shadows anything behind it), then the part surface under the ray.
-			const plate = this.continueBtn.visible ? this.ray.intersectObject(this.continueBtn.userData.plate, false)[0] : null;
+			const ui = this.pickUi(controllers);
+			const plate =
+				ui === 'continue'
+					? this.ray.intersectObject(this.continueBtn.userData.plate, false)[0]
+					: ui === 'play'
+						? this.ray.intersectObject(this.playBtn.userData.plate, false)[0]
+						: null;
 			if (plate) {
 				this.hoverPart(null);
 				hitDist = plate.distance;
@@ -829,6 +1060,7 @@ export class Lesson {
 				const id = this.grab ? this.grab.id : this.model.idOfHit(hits[0]) ?? null;
 				this.hoverPart(id);
 				if (hits[0]) hitDist = hits[0].distance;
+			}
 			}
 		}
 		this.updatePointers(controllers, ct, hitDist);

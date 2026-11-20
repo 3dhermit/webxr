@@ -114,6 +114,7 @@ function setupScene({ scene, camera, renderer, player, controllers, controls }) 
 			if (e.key === 'ArrowRight') lesson.next();
 			else if (e.key === 'ArrowLeft') lesson.prev();
 			else if (e.key === 'Enter' || e.key === ' ') lesson.select(lesson.hover);
+			else if (e.key === 'v') lesson.video?.isOpen ? lesson.closeVideo() : lesson.openVideo();
 			else if (e.key === 'r') lesson.reset();
 		});
 	}
@@ -126,9 +127,16 @@ function onFrame(delta, _time, globals) {
 
 	const ct = controllers.right || controllers.left;
 	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
+	if (lesson.pressVideo()) {
+		/* clip owns the trigger */
+	} else {
+		const ui = lesson.pickUi(controllers);
 		if (lesson.done) lesson.reset();
-		else if (lesson.pickButton(controllers)) lesson.next();
+		else if (ui === 'continue') lesson.next();
+		else if (ui === 'play') lesson.openVideo();
+		else if (typeof ui === 'string' && ui.startsWith('quiz-')) lesson.answerQuiz(+ui.slice(5));
 		else lesson.select(lesson.hover);
+	}
 	}
 
 	for (const hand of ['right', 'left']) {
