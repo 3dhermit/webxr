@@ -125,18 +125,21 @@ function onFrame(delta, _time, globals) {
 	const controllers = globals.controllers;
 	lesson.update(delta, controllers);
 
-	const ct = controllers.right || controllers.left;
-	if (ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) {
-	if (lesson.pressVideo()) {
-		/* clip owns the trigger */
-	} else {
-		const ui = lesson.pickUi(controllers);
+	for (const hand of ['right', 'left']) {
+		const ct = controllers[hand];
+		if (!ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) continue;
+		lesson.lastHand = hand;
+		if (lesson.video?.isOpen) {
+			lesson.aim(ct);
+			lesson.videoHover = lesson.probe().ui;
+			if (lesson.pressVideo()) continue;
+		}
+		const ui = lesson.pickUi(controllers, hand);
 		if (lesson.done) lesson.reset();
 		else if (ui === 'continue') lesson.next();
 		else if (ui === 'play') lesson.openVideo();
 		else if (typeof ui === 'string' && ui.startsWith('quiz-')) lesson.answerQuiz(+ui.slice(5));
 		else lesson.select(lesson.hover);
-	}
 	}
 
 	for (const hand of ['right', 'left']) {

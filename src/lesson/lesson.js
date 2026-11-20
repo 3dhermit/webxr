@@ -952,13 +952,16 @@ export class Lesson {
 		return this.lastHand;
 	}
 
-	/** Which UI plate the ray is on: 'continue', 'play', or null. */
-	pickUi(controllers) {
-		const ct = controllers?.right || controllers?.left;
-		if (!ct?.raySpace?.visible) return null;
+	/** Aim this.ray along a controller. */
+	aim(ct) {
+		if (!ct?.raySpace?.visible) return false;
 		const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
 		const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
 		this.ray.set(o, d);
+		return true;
+	}
+
+	uiFromRay() {
 		if (this.continueBtn.visible && this.ray.intersectObject(this.continueBtn.userData.plate, false).length)
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(this.playBtn.userData.plate, false).length) return 'play';
@@ -969,6 +972,44 @@ export class Lesson {
 			}
 		}
 		return null;
+	}
+
+	/** Hit under the current this.ray: UI plate, video control, or anatomy part. */
+	probe() {
+		if (this.video?.isOpen) {
+			const close = this.video.pickClose(this.ray);
+			const play = this.video.pickPlay(this.ray);
+			const pause = this.video.pickPause(this.ray);
+			const scrub = this.video.pickScrub(this.ray);
+			const panel = this.video.pickPanel(this.ray);
+			const ui = close ? 'close' : play ? 'play' : pause ? 'pause' : scrub ? 'scrub' : panel ? 'panel' : null;
+			const dist = close?.distance ?? play?.distance ?? pause?.distance ?? scrub?.distance ?? panel?.distance ?? null;
+			return { dist, ui, partId: null };
+		}
+		const ui = this.uiFromRay();
+		if (ui === 'continue') {
+			const hit = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'play') {
+			const hit = this.ray.intersectObject(this.playBtn.userData.plate, false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui && ui.startsWith('quiz-')) {
+			const b = this.quizBtns[+ui.slice(5)];
+			const hit = b ? this.ray.intersectObject(b.userData.plate, false)[0] : null;
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		const hits = this.model.hitList(this.ray, this.pickOpts());
+		return { dist: hits[0]?.distance ?? null, ui: null, partId: this.model.idOfHit(hits[0]) ?? null };
+	}
+
+	/** Which UI plate the given hand (or last aiming hand) is on. */
+	pickUi(controllers, hand) {
+		const h = hand || this.lastHand;
+		const ct = controllers?.[h] || controllers?.right || controllers?.left;
+		if (!this.aim(ct)) return null;
+		return this.uiFromRay();
 	}
 
 	/** Is the controller ray currently on the Continue plate? */
@@ -1038,49 +1079,36 @@ export class Lesson {
 		// tilt made it read edge-on at the edge of the Quest field of view.
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
 
-		const ct = controllers?.right || controllers?.left;
-		let hitDist = null;
-		if (ct?.raySpace?.visible) {
-			const o = ct.raySpace.getWorldPosition(new THREE.Vector3());
-			const d = new THREE.Vector3(0, 0, -1).applyQuaternion(ct.raySpace.getWorldQuaternion(new THREE.Quaternion()));
-			this.ray.set(o, d);
-			if (this.video?.isOpen) {
-				this.hoverPart(null);
-				const close = this.video.pickClose(this.ray);
-				const play = this.video.pickPlay(this.ray);
-				const pause = this.video.pickPause(this.ray);
-				const scrub = this.video.pickScrub(this.ray);
-				this.videoHover = close ? 'close' : play ? 'play' : pause ? 'pause' : scrub ? 'scrub' : this.video.pickPanel(this.ray) ? 'panel' : null;
-				this.setVideoBtn(this.video.closeBtn, this.videoHover === 'close');
-				this.setVideoBtn(this.video.playCtl, this.videoHover === 'play');
-				this.setVideoBtn(this.video.pauseCtl, this.videoHover === 'pause');
-				if (this.video.scrubbing) {
-					const u = this.video.scrubUFromRay(this.ray);
-					if (u != null) this.video.scrubTo(u);
-				}
-				hitDist = close?.distance ?? play?.distance ?? pause?.distance ?? scrub?.distance ?? this.video.pickPanel(this.ray)?.distance ?? null;
-			} else {
-			// F3: the pointer follows what the trigger will actually land on — the Continue
-			// plate first (it shadows anything behind it), then the part surface under the ray.
-			const ui = this.pickUi(controllers);
-			const plate =
-				ui === 'continue'
-					? this.ray.intersectObject(this.continueBtn.userData.plate, false)[0]
-					: ui === 'play'
-						? this.ray.intersectObject(this.playBtn.userData.plate, false)[0]
-						: null;
-			if (plate) {
-				this.hoverPart(null);
-				hitDist = plate.distance;
-			} else {
-				const hits = this.model.hitList(this.ray, this.pickOpts());
-				const id = this.grab ? this.grab.id : this.model.idOfHit(hits[0]) ?? null;
-				this.hoverPart(id);
-				if (hits[0]) hitDist = hits[0].distance;
-			}
-			}
+		const perHand = {};
+		let best = null;
+		for (const hand of ['right', 'left']) {
+			const c = controllers?.[hand];
+			if (!this.aim(c)) continue;
+			const hit = this.probe();
+			perHand[hand] = hit;
+			if (hit.dist != null && (!best || hit.dist < best.dist)) best = { hand, c, ...hit };
 		}
-		this.updatePointers(controllers, ct, hitDist);
+		const activeHand = best?.hand || this.activeHand(controllers);
+		if (best?.hand) this.lastHand = best.hand;
+		const ct = controllers?.[activeHand];
+		const hit = perHand[activeHand] || {};
+		const hitDist = hit.dist ?? null;
+		if (this.video?.isOpen) {
+			this.hoverPart(null);
+			this.videoHover = hit.ui ?? null;
+			this.setVideoBtn(this.video.closeBtn, this.videoHover === 'close');
+			this.setVideoBtn(this.video.playCtl, this.videoHover === 'play');
+			this.setVideoBtn(this.video.pauseCtl, this.videoHover === 'pause');
+			if (this.video.scrubbing && this.aim(ct)) {
+				const u = this.video.scrubUFromRay(this.ray);
+				if (u != null) this.video.scrubTo(u);
+			}
+		} else if (hit.ui) {
+			this.hoverPart(null);
+		} else {
+			this.hoverPart(this.grab ? this.grab.id : hit.partId ?? null);
+		}
+		this.updatePointers(controllers, ct, hitDist, perHand);
 		this.updateGrab(controllers);
 
 		if (this.hovGroup.visible && this.hovId) {
