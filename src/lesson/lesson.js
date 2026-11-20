@@ -185,9 +185,9 @@ export class Lesson {
 		this._quizDone = false;
 		this.buildQuizHud();
 
-		// Panels face the reader's eye height here, then track the head in update(). The Continue
-		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
 		this.uiParts = [this.prompt.group, this.feedback.group];
+		// Face the seated player origin once. Do NOT copy head yaw each frame — that made
+		// the cards swing left/right with every look.
 		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
 
 		// World-locked lecture clip. Not tied to a step: the Play video plate is always available.
@@ -319,6 +319,7 @@ export class Lesson {
 		this.introText.material.depthWrite = false;
 		this.introText.renderOrder = 42;
 		this.intro.add(this.introText);
+		this.intro.lookAt(0, 1.45, 0);
 		this.introTimer = 0;
 		this.startIntro();
 	}
@@ -387,6 +388,37 @@ export class Lesson {
 		const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
 		this.setCardFade(this._cardFade.from + (this._cardFade.to - this._cardFade.from) * e);
 		if (k >= 1) this._cardFade = null;
+	}
+
+	/**
+	 * Keep instruction plates off the heart mesh. Push along the XZ vector from the heart
+	 * centre until the card's box clears the heart box plus 4 cm.
+	 */
+	clearCardsFromHeart() {
+		if (!this.model?.group) return;
+		const heart = new THREE.Box3().setFromObject(this.model.group);
+		heart.expandByScalar(0.04);
+		const hc = heart.getCenter(new THREE.Vector3());
+		const tmp = new THREE.Vector3();
+		const dir = new THREE.Vector3();
+		const cards = [this.prompt?.group, this.feedback?.group];
+		if (this.intro?.visible) cards.push(this.intro);
+		if (this.quizHud?.visible) cards.push(this.quizHud);
+		for (const g of cards) {
+			if (!g?.visible) continue;
+			for (let n = 0; n < 16; n++) {
+				const box = new THREE.Box3().setFromObject(g);
+				if (!box.intersectsBox(heart)) break;
+				box.getCenter(tmp);
+				dir.copy(tmp).sub(hc);
+				dir.y = 0;
+				if (dir.lengthSq() < 1e-8) dir.set(1, 0, 0);
+				dir.normalize();
+				g.getWorldPosition(tmp).addScaledVector(dir, 0.025);
+				if (g.parent) g.parent.worldToLocal(tmp);
+				g.position.copy(tmp);
+			}
+		}
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -1323,12 +1355,7 @@ export class Lesson {
 		this.tickIntro(dt);
 		this.tickCardFade(dt);
 		if (this.quiz) this.placeQuizNearRA();
-
-		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
-		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed
-		// tilt made it read edge-on at the edge of the Quest field of view.
-		for (const head of this.uiParts) head.quaternion.copy(camQ);
-		if (this.intro?.visible) this.intro.quaternion.copy(camQ);
+		this.clearCardsFromHeart();
 
 		const perHand = {};
 		let best = null;
@@ -1362,6 +1389,7 @@ export class Lesson {
 		this.updatePointers(controllers, ct, hitDist, perHand);
 		this.updateGrab(controllers);
 
+		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
 		if (this.hovGroup.visible && this.hovId) {
 			this.placePartLabel(this.hovId, this.hovGroup, this.hovLine);
 			this.hovLabel.quaternion.copy(camQ);
