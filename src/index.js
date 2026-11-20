@@ -131,11 +131,22 @@ function onFrame(delta, _time, globals) {
 		else lesson.select(lesson.hover);
 	}
 
+	for (const hand of ['right', 'left']) {
+		const gp = controllers[hand]?.gamepad;
+		if (!gp) continue;
+		if (gp.getButtonDown?.(XR_BUTTONS.SQUEEZE)) {
+			lesson.lastHand = hand;
+			lesson.grabStart(hand, controllers, 'squeeze');
+		}
+		if (gp.getButtonUp?.(XR_BUTTONS.SQUEEZE)) lesson.grabEnd(hand, 'squeeze');
+	}
+
 	if (hud) {
 		const s = lesson.state();
 		hud.textContent = [
 			`step ${s.step}  ${s.stepId}  level=${s.level}`,
 			`explode ${s.factor}  hover=${s.hover ?? '-'}  ready=${s.ready}`,
+			`mixer ${window.__anatomy?.stats?.()?.mixerTime?.toFixed?.(3) ?? '-'} / ${window.__anatomy?.stats?.()?.clipDuration ?? '-'}  grab=${s.grab ? s.grab.id : '-'}`,
 			`flow ${s.flow ? `${s.flow.i}/8 misses=${s.flow.misses}` : '-'}   find left=${s.find.left}`,
 			`draw ${s.drawCalls}  tris ${s.tris}`,
 		].join('\n');

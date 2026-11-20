@@ -10,6 +10,17 @@ const OK = 0x8fe3a0;
 const BAD = 0xff9a8a;
 const MUTED = 0xb9c7d4;
 
+/** Hover/select names must draw over neighbouring anatomy, not vanish inside it. */
+function drawOnTop(label, line) {
+	const text = label.userData.text;
+	text.material = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false });
+	text.renderOrder = 20;
+	line.material.transparent = true;
+	line.material.depthTest = false;
+	line.material.depthWrite = false;
+	line.renderOrder = 19;
+}
+
 export class Lesson {
 	constructor({ player, camera, renderer, model, data, level, debug = false }) {
 		this.player = player;
@@ -56,6 +67,26 @@ export class Lesson {
 		this.t = new THREE.Vector3();
 		this.ray = new THREE.Raycaster();
 		this.hover = null;
+		this.grab = null;
+		this.lastHand = 'right';
+		this.selId = null;
+		this.selGroup = new THREE.Group();
+		this.selLabel = makeLabel((data.runtime || {}).labelTextHeightMetres ?? 0.019, 0xffffff);
+		this.selLine = makeLeaderLine();
+		this.selGroup.add(this.selLabel);
+		this.selGroup.visible = false;
+		this.selLine.visible = false;
+		this.root.add(this.selGroup, this.selLine);
+		this.hovId = null;
+		this.hovGroup = new THREE.Group();
+		this.hovLabel = makeLabel((data.runtime || {}).labelTextHeightMetres ?? 0.019, 0xffffff);
+		this.hovLine = makeLeaderLine();
+		this.hovGroup.add(this.hovLabel);
+		this.hovGroup.visible = false;
+		this.hovLine.visible = false;
+		this.root.add(this.hovGroup, this.hovLine);
+		drawOnTop(this.hovLabel, this.hovLine);
+		drawOnTop(this.selLabel, this.selLine);
 		this.flow = { i: 0, misses: 0 };
 		this.find = { queue: [], asked: null, misses: 0 };
 		this.done = false;
@@ -253,6 +284,9 @@ export class Lesson {
 		const st = this.steps[this.i];
 		const a = st.action || {};
 
+		this.grabEnd();
+		this.model.returnMoved();
+		this.clearSelected();
 		this.model.clearLook();
 		// `labels` is either 'core' (every pointable part), 'none', or an explicit id list. Step 2
 		// names only the four chambers because that is what the step asks the student to do, and
@@ -263,7 +297,7 @@ export class Lesson {
 		this.labelGroup.visible = !!labelIds;
 		this.waypointGroup.visible = !!a.flow;
 		if (labelIds) this.buildLabels(labelIds);
-		this.hover = null;
+		this.hoverPart(null);
 
 		if (a.isolate) this.model.isolate(a.isolate);
 		if (a.ghost) this.model.ghost(a.ghost);
@@ -422,6 +456,10 @@ export class Lesson {
 
 	finish() {
 		this.done = true;
+		this.grabEnd();
+		this.model.returnMoved();
+		this.clearSelected();
+		this.showHoverName(null);
 		this.labelGroup.visible = false;
 		this.waypointGroup.visible = false;
 		this.model.clearLook();
@@ -438,13 +476,16 @@ export class Lesson {
 		// tweens and per-part scatter flags used to survive, so the next student inherited the last
 		// student's progress as the first thing they saw.
 		this.done = false;
-		this.flow = null;
+		this.flow = { i: 0, misses: 0 };
 		this.find = { queue: [], asked: null, misses: 0 };
 		this.tweens = [];
 		this._lit = null;
+		this.grabEnd();
+		this.model.returnMoved();
+		this.clearSelected();
 		if (this.hover) this.model.highlight(this.hover, false);
 		this.hover = null;
-		this.hoverSay('');
+		this.showHoverName(null);
 		this.clearSay();
 		this.model.clearLook();
 		this.model.scatter();
@@ -456,11 +497,71 @@ export class Lesson {
 		if (this.hover === id) return;
 		if (this.hover) this.model.highlight(this.hover, false);
 		this.hover = id;
-		if (id) {
-			this.model.highlight(id, true);
-			const st = this.steps[this.i];
-			if (st?.action?.hoverNames) this.hoverSay(this.partName(id));
-		}
+		if (id) this.model.highlight(id, true);
+		this.showHoverName(id);
+	}
+
+	hoverNamesAllowed() {
+		return !!this.steps[this.i]?.action?.hoverNames;
+	}
+
+	hasStepLabel(id) {
+		return this.labelGroup.visible && this.labelGroup.children.some((c) => c.userData.id === id);
+	}
+
+	/** Pop the name up at the part under the pointer, or take it down (`id` null). */
+	showHoverName(id) {
+		const show =
+			!!id &&
+			id !== this.selId &&
+			this.hoverNamesAllowed() &&
+			!!this.model.parts.get(id) &&
+			!this.hasStepLabel(id);
+		this.hovId = show ? id : null;
+		this.hovGroup.visible = show;
+		this.hovLine.visible = show;
+		if (!show) return false;
+		this.hovLabel.userData.text.text = this.partName(id);
+		this.hovLabel.userData.text.sync();
+		this.placePartLabel(id, this.hovGroup, this.hovLine);
+		return true;
+	}
+
+	/**
+	 * Put a name just above the part on the reader's side, with a leader back to its centre.
+	 * Straight-above lands inside a neighbour once the heart is exploded.
+	 */
+	placePartLabel(id, group, line) {
+		const at = this.model.center(id);
+		const r = this.model.radius(id);
+		const eye = this.camera.getWorldPosition(this._lblEye || (this._lblEye = new THREE.Vector3()));
+		const toEye = (this._lblDir || (this._lblDir = new THREE.Vector3())).copy(eye).sub(at);
+		const d = toEye.length() || 1;
+		toEye.multiplyScalar(1 / d);
+		const label = at.clone().addScaledVector(toEye, Math.min(r + 0.02, d * 0.4));
+		label.y += r * 0.6 + 0.045;
+		group.position.copy(label);
+		updateLeaderLine(line, at, label);
+	}
+
+	showSelected(id) {
+		if (!id || !this.model.parts.get(id) || this.hasStepLabel(id)) return this.clearSelected();
+		this.selId = id;
+		this.selLabel.userData.text.text = this.partName(id);
+		this.selLabel.userData.text.sync();
+		this.selGroup.visible = true;
+		this.selLine.visible = true;
+		this.placePartLabel(id, this.selGroup, this.selLine);
+		this.showHoverName(this.hover);
+		return true;
+	}
+
+	clearSelected() {
+		this.selId = null;
+		this.selGroup.visible = false;
+		this.selLine.visible = false;
+		this.showHoverName(this.hover);
+		return false;
 	}
 
 	hoverSay(msg) {
@@ -509,6 +610,7 @@ export class Lesson {
 			if (this.done) this.reset();
 			return null;
 		}
+		this.showSelected(id);
 		const st = this.steps[this.i];
 		const a = st?.action || {};
 
@@ -603,6 +705,70 @@ export class Lesson {
 		if (this.onEvent) this.onEvent(kind);
 	}
 
+	/**
+	 * Squeeze pressed: take hold of whatever the pointer is on.
+	 * Trigger stays select/advance so the two verbs never collide.
+	 */
+	grabStart(hand, controllers, via = 'squeeze') {
+		if (this.grab) return false;
+		const id = this.hover;
+		if (!id) return false;
+		const ct = controllers?.[hand];
+		if (!ct?.gripSpace) return false;
+		const start = this.model.beginGrab(id);
+		if (!start) return false;
+		const handWorld = ct.gripSpace.getWorldPosition(new THREE.Vector3());
+		const handQuat = ct.gripSpace.getWorldQuaternion(new THREE.Quaternion());
+		this.grab = {
+			id,
+			hand,
+			via,
+			offset: start.pos.clone().sub(handWorld),
+			handQuat0: handQuat.clone(),
+			handQuat0Inv: handQuat.clone().invert(),
+			partQuat0: start.quat.clone(),
+		};
+		this.model.highlight(id, true);
+		this.fire('grab-start', id);
+		return true;
+	}
+
+	grabEnd(hand, via) {
+		if (!this.grab) return false;
+		if (hand && this.grab.hand !== hand) return false;
+		if (via && this.grab.via !== via) return false;
+		const id = this.grab.id;
+		this.model.endGrab(id);
+		this.model.highlight(id, false);
+		this.grab = null;
+		this.fire('grab-end', id);
+		return true;
+	}
+
+	/** Per-frame: drive the held part from the grip pose. */
+	updateGrab(controllers) {
+		if (!this.grab) return;
+		const ct = controllers?.[this.grab.hand];
+		if (!ct?.gripSpace?.visible) {
+			this.grabEnd();
+			return;
+		}
+		const g = this.grab;
+		const handWorld = ct.gripSpace.getWorldPosition(this.t).clone();
+		const handQuat = ct.gripSpace.getWorldQuaternion(new THREE.Quaternion());
+		const delta = handQuat.clone().multiply(g.handQuat0Inv);
+		const pos = handWorld.add(g.offset.clone().applyQuaternion(delta));
+		const quat = delta.clone().multiply(g.partQuat0);
+		this.model.setGrabWorld(g.id, pos, quat);
+	}
+
+	activeHand(controllers) {
+		if (controllers?.[this.lastHand]?.raySpace?.visible) return this.lastHand;
+		if (controllers?.right?.raySpace?.visible) return 'right';
+		if (controllers?.left?.raySpace?.visible) return 'left';
+		return this.lastHand;
+	}
+
 	/** Is the controller ray currently on the Continue plate? */
 	pickButton(controllers) {
 		const ct = controllers?.right || controllers?.left;
@@ -660,11 +826,22 @@ export class Lesson {
 				hitDist = plate.distance;
 			} else {
 				const hits = this.model.hitList(this.ray, this.pickOpts());
-				this.hoverPart(this.model.idOfHit(hits[0]) ?? null);
+				const id = this.grab ? this.grab.id : this.model.idOfHit(hits[0]) ?? null;
+				this.hoverPart(id);
 				if (hits[0]) hitDist = hits[0].distance;
 			}
 		}
 		this.updatePointers(controllers, ct, hitDist);
+		this.updateGrab(controllers);
+
+		if (this.hovGroup.visible && this.hovId) {
+			this.placePartLabel(this.hovId, this.hovGroup, this.hovLine);
+			this.hovLabel.quaternion.copy(camQ);
+		}
+		if (this.selGroup.visible && this.selId) {
+			this.placePartLabel(this.selId, this.selGroup, this.selLine);
+			this.selLabel.quaternion.copy(camQ);
+		}
 
 		if (this.labelGroup.visible) this.updateLabels();
 
@@ -746,6 +923,7 @@ export class Lesson {
 			flow: this.flow,
 			find: { asked: this.find.asked, left: this.find.queue.length },
 			hover: this.hover,
+			grab: this.grab ? { id: this.grab.id, hand: this.grab.hand } : null,
 			ready: !!this.continueOn,
 			done: this.done,
 			drawCalls: this.renderer?.info?.render?.calls,

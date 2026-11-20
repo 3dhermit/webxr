@@ -180,7 +180,7 @@
       "action": {
         "explode": 0,
         "labels": "none",
-        "hoverNames": false
+        "hoverNames": true
       },
       "why": "Committing to a prediction before the model is taken apart makes the later explanation something the student needs, not something they receive."
     },
@@ -245,7 +245,7 @@
         "flow": true,
         "explode": 1,
         "labels": "none",
-        "hoverNames": false
+        "hoverNames": true
       },
       "why": "Ordering the components is the systems-model claim itself, and it is the first retrieval practice in the lesson."
     },
@@ -263,7 +263,7 @@
         "reassemble": true,
         "labels": "none",
         "explode": 1,
-        "hoverNames": false
+        "hoverNames": true
       },
       "why": "Cold naming after labels are removed is retrieval practice; it is the part that produces durable memory, and it is also the formative check the student sees instantly."
     }
@@ -400,8 +400,8 @@
     }
   ],
   "runtime": {
-    "note": "Tunable by a teacher without touching code. Explode gain was measured in a browser run: gain 0.55 gave 14/14 draw calls with a 0.96 m exploded extent; gain 1.0 pushed parts out of the camera frustum (draw calls fell 14 -> 11).",
-    "explodeGain": 0.27,
+    "note": "Tunable by a teacher without touching code. explodeGain 1.0 scrubs the baked 2.5s explode clips all the way to the last keyframe (every clip has a key at t=2.5). Gain 0.27 used to stop the playhead at ~0.67s so the tail of the animation never ran.",
+    "explodeGain": 1,
     "hitSphereMinMetres": 0.025,
     "tablePlacement": {
       "modelScale": 2.4,

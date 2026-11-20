@@ -88,6 +88,9 @@ export class AnatomyModel {
 				node, // what actually explodes (the mesh itself for the papillary)
 				spec,
 				home: mesh.position.clone(),
+				// Captured for every part up front rather than lazily on first grab: a reset has
+				// to restore a pose it was never told was going to change.
+				homeQuat: mesh.quaternion.clone(),
 				centerLocal,
 				localOut: b.sub(a), // keeps the parent's scale; do not normalise
 				mat: mesh.material,
@@ -223,6 +226,7 @@ export class AnatomyModel {
 		const f = THREE.MathUtils.clamp(this.factor, 0, 1);
 		for (const p of this.parts.values()) {
 			if (!p.action) continue;
+			p.action.enabled = !p.held;
 			p.action.setEffectiveWeight(p.outAmount);
 		}
 		// A group's clip is a no-op once every muscle in it is home — otherwise the last
@@ -239,15 +243,94 @@ export class AnatomyModel {
 			// never mixed in.
 			for (const p of this.parts.values()) if (p.action) p.action.paused = false;
 			for (const g of this.groupActions) g.action.paused = false;
-			// Gain scales how deep into the (eased) clip we scrub. The baked curves are
-			// ease-out, so the lesson's compact 0.27 gain still reads as a full separation.
+			// explodeGain 1 + factor 1 scrubs to clipDuration, which is the last baked keyframe
+			// (all 11 clips end at t=2.5 with a key on that frame). A gain below 1 used to stop
+			// the playhead early (~27% of the clip) so the tail frames never ran.
 			this.mixer.setTime(Math.min(f * this.explodeGain, 1) * this.clipDuration);
 		}
 		for (const p of this.parts.values()) {
-			if (p.action) continue;
-			const k = f * p.outAmount * this.explodeGain;
-			p.mesh.position.copy(p.home).addScaledVector(p.localOut, p.spec.spread * k);
+			// While the controller owns a part, it owns the mesh pose outright — otherwise an
+			// explode tween running during a grab would drag the part out of the hand.
+			if (p.held) continue;
+			if (p.action) {
+				// Mixer writes the NODE; mesh offset is the student's grab displacement.
+				p.mesh.position.copy(p.home);
+				if (p.moved) p.mesh.position.add(p.moved);
+			} else {
+				const k = f * p.outAmount * this.explodeGain;
+				p.mesh.position.copy(p.home).addScaledVector(p.localOut, p.spec.spread * k);
+				if (p.moved) p.mesh.position.add(p.moved);
+			}
+			if (!p.turned && p.homeQuat) p.mesh.quaternion.copy(p.homeQuat);
 		}
+	}
+
+	/** Where a part's mesh sits for the current explode, before any manual displacement. */
+	basePos(p, target) {
+		if (p.action) return target.copy(p.home);
+		const f = THREE.MathUtils.clamp(this.factor, 0, 1) * p.outAmount;
+		return target.copy(p.home).addScaledVector(p.localOut, p.spec.spread * f * this.explodeGain);
+	}
+
+	/**
+	 * Take hold of a part. Returns its current world pose so the caller can record the
+	 * offset to the hand and move it from where it already is: snapping the part's origin
+	 * onto the controller would make every grab jump.
+	 */
+	beginGrab(id) {
+		const p = this.parts.get(id);
+		if (!p) return null;
+		p.held = true;
+		if (p.action) p.action.enabled = false;
+		return {
+			pos: p.mesh.getWorldPosition(new THREE.Vector3()),
+			quat: p.mesh.getWorldQuaternion(new THREE.Quaternion()),
+		};
+	}
+
+	/**
+	 * Drive a held part to a world pose. Convert through the mesh's OWN parent, not the
+	 * model group: quantized glTF puts scale on ancestor nodes.
+	 */
+	setGrabWorld(id, worldPos, worldQuat) {
+		const p = this.parts.get(id);
+		if (!p || !p.held) return false;
+		const parent = p.mesh.parent;
+		const local = parent.worldToLocal(worldPos.clone());
+		p.mesh.position.copy(local);
+		p.moved = local.clone().sub(this.basePos(p, new THREE.Vector3()));
+		if (worldQuat) {
+			const inv = parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+			p.mesh.quaternion.copy(inv.multiply(worldQuat));
+			p.turned = true;
+		}
+		return true;
+	}
+
+	endGrab(id) {
+		const p = this.parts.get(id);
+		if (!p) return false;
+		p.held = false;
+		if (p.action) p.action.enabled = true;
+		return true;
+	}
+
+	/**
+	 * Send every part back to its authored pose. Unconditional: a classroom reset between
+	 * students has to be exact whether or not the grab bookkeeping kept up.
+	 */
+	returnMoved() {
+		let n = 0;
+		for (const p of this.parts.values()) {
+			if (p.moved || p.turned || p.held) n += 1;
+			p.moved = null;
+			p.turned = false;
+			p.held = false;
+			if (p.action) p.action.enabled = true;
+			if (p.homeQuat) p.mesh.quaternion.copy(p.homeQuat);
+		}
+		this.apply();
+		return n;
 	}
 
 	setFactor(f) {
@@ -405,6 +488,9 @@ export class AnatomyModel {
 			ids: [...this.parts.keys()],
 			materials: new Set([...this.parts.values()].map((p) => p.mat.uuid)).size,
 			factor: this.factor,
+			explodeGain: this.explodeGain,
+			clipDuration: this.clipDuration,
+			mixerTime: this.mixer ? this.mixer.time : 0,
 		};
 	}
 }
