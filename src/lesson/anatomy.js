@@ -21,8 +21,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
-const SYS_HUE = { chamber: 0.6, valve: 0.045, support: 0.135, organ: 0.35 };
-
 export class AnatomyModel {
 	constructor(group, parts, box) {
 		this.group = group;
@@ -50,7 +48,6 @@ export class AnatomyModel {
 		});
 
 		const parts = new Map();
-		let i = 0;
 		const inv = new THREE.Matrix4();
 		const bb = new THREE.Box3();
 		for (const mesh of meshes) {
@@ -63,16 +60,16 @@ export class AnatomyModel {
 				node = mesh.parent;
 			}
 			if (!spec) continue; // registry-driven: unknown meshes stay inert
-			mesh.material = mesh.material.clone();
-			mesh.material.color.setHSL(
-				SYS_HUE[spec.system] + (i++ % 5) * 0.032,
-				0.6,
-				0.55,
-			);
-			mesh.material.roughness = 0.55;
-			mesh.material.transparent = false;
-			mesh.material.opacity = 1;
-			mesh.userData.partId = spec.id;
+				// Clone so isolate/ghost/emissive highlight can be per-part. Do NOT retint
+				// material.color — HRA already authored one albedo set; multiplying by a
+				// system HSL (chamber 0.6) is what made atria/ventricles look purple while
+				// valves (hue 0.045) stayed warm. White leaves the maps as shipped.
+				mesh.material = mesh.material.clone();
+				mesh.material.color.setHex(0xffffff);
+				if ('metalness' in mesh.material) mesh.material.metalness = 0;
+				mesh.material.transparent = false;
+				mesh.material.opacity = 1;
+				mesh.userData.partId = spec.id;
 
 			inv.copy(mesh.parent.matrixWorld).invert();
 			const a = new THREE.Vector3(0, 0, 0).applyMatrix4(inv);

@@ -172,7 +172,7 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 /** Equirect 360 as a sky sphere so hiding it reveals Quest passthrough in immersive-ar. */
 async function loadSky(scene) {
 	try {
-		const tex = await new THREE.TextureLoader().loadAsync('assets/env/ymax-360.png');
+		const tex = await new THREE.TextureLoader().loadAsync('assets/env/studio-360.jpg');
 		tex.mapping = THREE.EquirectangularReflectionMapping;
 		tex.colorSpace = THREE.SRGBColorSpace;
 		tex.anisotropy = 4;

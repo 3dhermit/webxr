@@ -131,6 +131,7 @@ function onFrame(delta, _time, globals) {
 		const ct = controllers[hand];
 		if (!ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) continue;
 		lesson.lastHand = hand;
+		lesson.dismissIntro();
 		if (lesson.video?.isOpen) {
 			lesson.aim(ct);
 			lesson.videoHover = lesson.probe().ui;
@@ -153,6 +154,16 @@ function onFrame(delta, _time, globals) {
 			lesson.grabStart(hand, controllers, 'squeeze');
 		}
 		if (gp.getButtonUp?.(XR_BUTTONS.SQUEEZE)) lesson.grabEnd(hand, 'squeeze');
+	}
+
+	if (controllers?.left?.gamepad?.getButton?.(XR_BUTTONS.SQUEEZE) && controllers?.right?.gamepad?.getButton?.(XR_BUTTONS.SQUEEZE)) {
+		lesson._resetHold = (lesson._resetHold || 0) + delta;
+		if (lesson._resetHold >= 1.5) {
+			lesson._resetHold = 0;
+			lesson.reset();
+		}
+	} else {
+		lesson._resetHold = 0;
 	}
 
 	if (hud) {

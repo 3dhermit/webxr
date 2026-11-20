@@ -4,7 +4,7 @@
  * Nothing is stored — the classroom rule is formative feedback only, no records, no accounts.
  */
 import * as THREE from 'three';
-import { Panel, makeButton, makeLabel, makeLeaderLine, makeText, setButtonLabel, updateLeaderLine } from './text.js';
+import { Panel, btnHit, makeButton, makeLabel, makeLeaderLine, makeText, setButtonLabel, updateLeaderLine } from './text.js';
 import { VideoScreen } from './video.js';
 
 const OK = 0x8fe3a0;
@@ -185,7 +185,7 @@ export class Lesson {
 	}
 
 	buildUI() {
-		const { panelW, panelZ, promptText, feedText, btnW, eyeY } = this.ui;
+		const { panelW, panelZ, promptText, feedText, eyeY } = this.ui;
 		// One panel carries the step counter inside it. A separate floating counter line printed
 		// straight through the prompt panel and read as doubled text.
 		this.prompt = new Panel({ width: panelW, fontSize: promptText });
@@ -199,16 +199,21 @@ export class Lesson {
 		this.feedback.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
-		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
-		this.playBtn = makeButton({ label: 'Play video', width: btnW, height: btnW * 0.26 });
-		// Head-locked at 0.5 m so both plates stay near the eyes and do not sit on the heart.
+		// Tiny stand-ins — later swapped for designed image plates.
+		const hudW = 0.05;
+		const hudH = 0.016;
+		const hudFs = 0.007;
+		this.continueBtn = makeButton({ label: 'Continue', width: hudW, height: hudH, fontSize: hudFs });
+		this.playBtn = makeButton({ label: 'Play video', width: hudW, height: hudH, fontSize: hudFs });
+		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
 		this.hudBtns.position.set(0, 0, -0.5);
-		this.continueBtn.position.set(0.13, -0.18, 0);
-		this.playBtn.position.set(-0.13, -0.18, 0);
-		this.passBtn = makeButton({ label: 'Passthrough', width: btnW, height: btnW * 0.26 });
-		this.passBtn.position.set(0, -0.12, 0);
+		this.continueBtn.position.set(0.08, -0.2, 0);
+		this.playBtn.position.set(-0.08, -0.2, 0);
+		this.passBtn.position.set(0, -0.2, 0);
 		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn);
+		this.buildStepDots();
+		this.buildIntro();
 		this.camera.add(this.hudBtns);
 		this.root.add(this.prompt.group, this.feedback.group);
 
@@ -233,12 +238,12 @@ export class Lesson {
 
 	/**
 	 * Head-locked quiz overlay. Parent is the XR camera so the card inherits yaw/pitch/roll
-	 * with zero lag — no world position, no billboard copy, no lerp. 0.6 m in front of the
-	 * eye (inside 0.5–0.7 m); camera near is 0.1 m so it does not clip. Type is sized for
+	 * with zero lag — no world position, no billboard copy, no lerp. 0.8 m in front of the
+	 * eye (body copy, not the 0.5 m icon HUD). Camera near is 0.1 m so it does not clip. Type is sized for
 	 * Quest 2 (~18.5 px/deg): heading 32 px, body 24 px.
 	 */
 	buildQuizHud() {
-		const dist = 0.6;
+		const dist = 0.8;
 		const px = (pxSize) => dist * Math.tan(((pxSize / 18.5) * Math.PI) / 180);
 		this.quizDist = dist;
 		this.quizHud = new THREE.Group();
@@ -285,13 +290,83 @@ export class Lesson {
 		const bw = 0.155;
 		const bh = 0.042;
 		for (let i = 0; i < 4; i++) {
-			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(24) });
+			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(24), hitScale: 1.25 });
 			b.userData.plate.material = new THREE.MeshBasicMaterial({ color: 0x2f6fb3, depthTest: false, depthWrite: false });
 			b.userData.plate.renderOrder = 31;
 			b.visible = false;
 			this.quizHud.add(b);
 			this.quizBtns.push(b);
 		}
+	}
+
+	/** Five dots above the HUD chips. Progress is the dots, not "Step 3 of 5" copy. */
+	buildStepDots() {
+		this.stepDots = new THREE.Group();
+		this.stepDots.position.set(0, -0.172, 0);
+		this.hudBtns.add(this.stepDots);
+		const n = this.steps.length;
+		const gap = 0.014;
+		const geo = new THREE.CircleGeometry(0.0038, 16);
+		for (let i = 0; i < n; i++) {
+			const d = new THREE.Mesh(
+				geo,
+				new THREE.MeshBasicMaterial({ color: 0x3a4550, depthTest: false, depthWrite: false }),
+			);
+			d.position.x = (i - (n - 1) / 2) * gap;
+			d.renderOrder = 41;
+			d.raycast = () => {};
+			this.stepDots.add(d);
+		}
+	}
+
+	updateStepDots() {
+		if (!this.stepDots) return;
+		this.stepDots.children.forEach((d, i) => {
+			d.material.color.setHex(i < this.i ? 0x8fe3a0 : i === this.i ? 0xffffff : 0x3a4550);
+			d.scale.setScalar(i === this.i ? 1.3 : 1);
+		});
+	}
+
+	/** Head-locked two-verb coach, 10 s, 0.8 m (body copy, not icon distance). */
+	buildIntro() {
+		this.intro = new THREE.Group();
+		this.intro.position.set(0, 0.04, -0.8);
+		this.intro.visible = false;
+		this.camera.add(this.intro);
+		this.introText = makeText({
+			fontSize: 0.022,
+			maxWidth: 0.5,
+			anchorX: 'center',
+			anchorY: 'middle',
+			align: 'center',
+			color: 0xffffff,
+		});
+		this.introText.text = 'Trigger = select / next\nSqueeze = pick up a part\nHold both grips to start over';
+		this.introText.sync();
+		this.introText.material.depthTest = false;
+		this.introText.material.depthWrite = false;
+		this.introText.renderOrder = 42;
+		this.intro.add(this.introText);
+		this.introTimer = 0;
+		this.startIntro();
+	}
+
+	startIntro() {
+		this.introTimer = 10;
+		if (this.intro) this.intro.visible = true;
+		if (this.introText) this.introText.fillOpacity = 1;
+	}
+
+	dismissIntro() {
+		this.introTimer = 0;
+		if (this.intro) this.intro.visible = false;
+	}
+
+	tickIntro(dt) {
+		if (!this.intro?.visible) return;
+		this.introTimer -= dt;
+		if (this.introTimer < 1.2 && this.introText) this.introText.fillOpacity = Math.max(0, this.introTimer / 1.2);
+		if (this.introTimer <= 0) this.dismissIntro();
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -410,9 +485,10 @@ export class Lesson {
 		if (a.reassemble) this.model.scatter();
 		this.tweenFactor(target, a.explode === 0 ? 0.6 : 5.0);
 
-		this.prompt.set(`Step ${this.i + 1} of ${this.steps.length} · ${st.title}\n\n${st.verb.toUpperCase()} — ${this.textOf(st.prompt)}`);
+		this.prompt.set(`${st.title}\n\n${st.verb.toUpperCase()} — ${this.textOf(st.prompt)}`);
 		this.say(this.misconceptionFor(st.id));
 		this.setContinueEnabled(!a.flow && !a.reassemble);
+		this.updateStepDots();
 		this.relayout();
 		this.fire('step', st.id);
 		return st;
@@ -567,6 +643,7 @@ export class Lesson {
 		this.waypointGroup.visible = false;
 		this.showHoverName(null);
 		this.clearSelected();
+		this.dismissIntro();
 		const title = item.title || `Quiz ${n + 1}`;
 		this.quizTitle.text = title;
 		this.quizTitle.sync();
@@ -684,6 +761,7 @@ export class Lesson {
 		this.model.scatter();
 		this.model.setFactor(0);
 		this.enterStep(0);
+		this.startIntro();
 	}
 
 	hoverPart(id) {
@@ -919,6 +997,7 @@ export class Lesson {
 			this.selLine,
 			this.model.group,
 			this.quizHud,
+			this.intro,
 		];
 	}
 
@@ -1050,14 +1129,14 @@ export class Lesson {
 	}
 
 	uiFromRay() {
-		if (this.continueBtn.visible && this.ray.intersectObject(this.continueBtn.userData.plate, false).length)
+		if (this.continueBtn.visible && this.ray.intersectObject(btnHit(this.continueBtn), false).length)
 			return 'continue';
-		if (this.playBtn.visible && this.ray.intersectObject(this.playBtn.userData.plate, false).length) return 'play';
-		if (this.passBtn?.visible && this.ray.intersectObject(this.passBtn.userData.plate, false).length) return 'pass';
+		if (this.playBtn.visible && this.ray.intersectObject(btnHit(this.playBtn), false).length) return 'play';
+		if (this.passBtn?.visible && this.ray.intersectObject(btnHit(this.passBtn), false).length) return 'pass';
 		if (this.quiz) {
 			for (let i = 0; i < this.quizBtns.length; i++) {
 				const b = this.quizBtns[i];
-				if (b.visible && this.ray.intersectObject(b.userData.plate, false).length) return `quiz-${i}`;
+				if (b.visible && this.ray.intersectObject(btnHit(b), false).length) return `quiz-${i}`;
 			}
 		}
 		return null;
@@ -1077,20 +1156,20 @@ export class Lesson {
 		}
 		const ui = this.uiFromRay();
 		if (ui === 'continue') {
-			const hit = this.ray.intersectObject(this.continueBtn.userData.plate, false)[0];
+			const hit = this.ray.intersectObject(btnHit(this.continueBtn), false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui === 'play') {
-			const hit = this.ray.intersectObject(this.playBtn.userData.plate, false)[0];
+			const hit = this.ray.intersectObject(btnHit(this.playBtn), false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui === 'pass') {
-			const hit = this.ray.intersectObject(this.passBtn.userData.plate, false)[0];
+			const hit = this.ray.intersectObject(btnHit(this.passBtn), false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui && ui.startsWith('quiz-')) {
 			const b = this.quizBtns[+ui.slice(5)];
-			const hit = b ? this.ray.intersectObject(b.userData.plate, false)[0] : null;
+			const hit = b ? this.ray.intersectObject(btnHit(b), false)[0] : null;
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		const hits = this.model.hitList(this.ray, this.pickOpts());
@@ -1166,6 +1245,7 @@ export class Lesson {
 		}
 
 		if (this.video?.isOpen) this.video.update(dt);
+		this.tickIntro(dt);
 
 		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
 		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed

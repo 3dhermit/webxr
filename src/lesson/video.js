@@ -17,7 +17,7 @@
  */
 import * as THREE from 'three';
 
-import { makeButton, makeText, setButtonLabel } from './text.js';
+import { btnHit, makeButton, makeText, setButtonLabel } from './text.js';
 
 export class VideoScreen {
 	constructor({ camera, parent, videos = {}, runtime = {} }) {
@@ -422,19 +422,19 @@ export class VideoScreen {
 	/** Is the ray on the Close plate? */
 	pickClose(ray) {
 		if (!this.isOpen) return null;
-		const hit = ray.intersectObject(this.closeBtn.userData.plate, false)[0];
+		const hit = ray.intersectObject(btnHit(this.closeBtn), false)[0];
 		return hit ? { distance: hit.distance } : null;
 	}
 
 	pickPlay(ray) {
 		if (!this.isOpen) return null;
-		const hit = ray.intersectObject(this.playCtl.userData.plate, false)[0];
+		const hit = ray.intersectObject(btnHit(this.playCtl), false)[0];
 		return hit ? { distance: hit.distance } : null;
 	}
 
 	pickPause(ray) {
 		if (!this.isOpen) return null;
-		const hit = ray.intersectObject(this.pauseCtl.userData.plate, false)[0];
+		const hit = ray.intersectObject(btnHit(this.pauseCtl), false)[0];
 		return hit ? { distance: hit.distance } : null;
 	}
 

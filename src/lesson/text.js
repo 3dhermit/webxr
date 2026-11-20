@@ -158,8 +158,13 @@ export function updateLeaderLine(line, fromWorld, toWorld) {
 	line.geometry.computeBoundingSphere();
 }
 
+/** Raycast mesh for a makeButton (invisible pad, 2× the art by default). */
+export function btnHit(btn) {
+	return btn?.userData?.hit || btn?.userData?.plate;
+}
+
 /** 3D button: a plate plus a caption. Returns an Object3D whose userData.onClick we wire up. */
-export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02 }) {
+export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02, hitScale = 2 }) {
 	const g = new THREE.Group();
 	const plate = new THREE.Mesh(
 		new THREE.PlaneGeometry(width, height),
@@ -168,10 +173,16 @@ export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02
 	const caption = makeText({ fontSize, maxWidth: width, anchorX: 'center', anchorY: 'middle', align: 'center' });
 	caption.text = label;
 	caption.sync();
-	g.add(plate, caption);
+	const hit = new THREE.Mesh(
+		new THREE.PlaneGeometry(width * hitScale, height * hitScale),
+		new THREE.MeshBasicMaterial({ visible: false, depthTest: false, depthWrite: false }),
+	);
+	hit.renderOrder = 40;
+	g.add(plate, caption, hit);
 	caption.position.z = 0.006;
 	g.userData.plate = plate;
 	g.userData.caption = caption;
+	g.userData.hit = hit;
 	return g;
 }
 
