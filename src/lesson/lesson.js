@@ -120,21 +120,19 @@ export class Lesson {
 	}
 
 	/**
-	 * Instruction card sits on the midline, just in front of the heart (closer to the student
-	 * than the organ at ~0.7 m). Side-of-cloud placement put the starting prompt off in the
-	 * periphery; the first thing they should read is the card in front of the model.
+	 * Step card: wider, viewer-right of the heart, 0.5 m in front of the organ.
+	 * Starting two-verb copy is a separate centered plate that plays first.
 	 */
 	planUi() {
 		const g = this.uiDeg;
 		const rad = (d) => (d * Math.PI) / 180;
 		const p = 0.5;
-		const w = rad(g.width);
 		this.ui.panelZ = -p;
-		this.ui.panelX = 0;
-		this.ui.panelW = 2 * p * Math.tan(w / 2);
+		this.ui.panelX = 0.24;
+		this.ui.panelW = 0.38;
 		this.ui.promptText = p * Math.tan(rad(g.promptText));
 		this.ui.feedText = p * Math.tan(rad(g.feedText));
-		this.ui.panelBottom = this.ui.eyeY + p * Math.tan(rad(-8));
+		this.ui.panelBottom = 1.28;
 		this.ui.btnX = p * Math.tan(rad(g.btnAz));
 		this.ui.btnY = this.ui.eyeY + p * Math.tan(rad(g.btnElev));
 		this.ui.btnW = p * Math.tan(rad(g.btnWidth));
@@ -300,19 +298,20 @@ export class Lesson {
 		});
 	}
 
-	/** Head-locked two-verb coach, 10 s, 0.8 m (body copy, not icon distance). */
+	/** Centered in front of the heart — plays first, before the step card fades up. */
 	buildIntro() {
 		this.intro = new THREE.Group();
-		this.intro.position.set(0, 0.04, -0.8);
+		this.intro.position.set(0, 1.4, -0.48);
 		this.intro.visible = false;
-		this.camera.add(this.intro);
+		this.player.add(this.intro);
 		this.introText = makeText({
-			fontSize: 0.022,
-			maxWidth: 0.5,
+			fontSize: 0.028,
+			maxWidth: 0.55,
 			anchorX: 'center',
 			anchorY: 'middle',
 			align: 'center',
 			color: 0xffffff,
+			lineHeight: 1.35,
 		});
 		this.introText.text = 'Trigger = select / next\nSqueeze = pick up a part\nHold both grips to start over';
 		this.introText.sync();
@@ -325,21 +324,69 @@ export class Lesson {
 	}
 
 	startIntro() {
+		this._awaitIntro = true;
+		this.setCardFade(0);
+		if (this.prompt) this.prompt.group.visible = false;
+		if (this.feedback) this.feedback.group.visible = false;
 		this.introTimer = 10;
 		if (this.intro) this.intro.visible = true;
-		if (this.introText) this.introText.fillOpacity = 1;
+		if (this.introText) this.introText.fillOpacity = 0;
+		this._introFade = { from: 0, to: 1, t: 0, dur: 0.55 };
 	}
 
 	dismissIntro() {
+		if (!this.intro?.visible && !this._awaitIntro) return;
 		this.introTimer = 0;
-		if (this.intro) this.intro.visible = false;
 	}
 
 	tickIntro(dt) {
-		if (!this.intro?.visible) return;
-		this.introTimer -= dt;
-		if (this.introTimer < 1.2 && this.introText) this.introText.fillOpacity = Math.max(0, this.introTimer / 1.2);
-		if (this.introTimer <= 0) this.dismissIntro();
+		if (this._awaitIntro || this.intro?.visible) this.introTimer -= dt;
+		if (this.introTimer <= 0 && this._introFade?.to !== 0 && (this.intro?.visible || this._awaitIntro)) {
+			this._introFade = { from: this.introText?.fillOpacity ?? 1, to: 0, t: 0, dur: 0.45 };
+		}
+		if (this._introFade) {
+			this._introFade.t += dt;
+			const k = Math.min(1, this._introFade.t / this._introFade.dur);
+			const v = this._introFade.from + (this._introFade.to - this._introFade.from) * k;
+			if (this.introText) this.introText.fillOpacity = v;
+			if (this.intro) this.intro.visible = v > 0.02 || this._introFade.to === 1;
+			if (k >= 1) {
+				const out = this._introFade.to === 0;
+				this._introFade = null;
+				if (out) {
+					if (this.intro) this.intro.visible = false;
+					this._awaitIntro = false;
+					this.beginCardFade();
+				}
+			}
+			return;
+		}
+	}
+
+	setCardFade(k) {
+		const t = Math.max(0, Math.min(1, k));
+		for (const pan of [this.prompt, this.feedback]) {
+			if (!pan) continue;
+			pan.back.material.opacity = 0.82 * t;
+			pan.text.fillOpacity = t;
+			pan.group.visible = t > 0.02;
+		}
+	}
+
+	beginCardFade() {
+		if (this.prompt) this.prompt.group.visible = true;
+		if (this.feedback) this.feedback.group.visible = true;
+		this._cardFade = { from: 0, to: 1, t: 0, dur: 0.7 };
+		this.setCardFade(0);
+	}
+
+	tickCardFade(dt) {
+		if (!this._cardFade) return;
+		this._cardFade.t += dt;
+		const k = Math.min(1, this._cardFade.t / this._cardFade.dur);
+		const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+		this.setCardFade(this._cardFade.from + (this._cardFade.to - this._cardFade.from) * e);
+		if (k >= 1) this._cardFade = null;
 	}
 
 	/** Build the leader-line labels for the core (pointable) tier. */
@@ -463,6 +510,8 @@ export class Lesson {
 		this.setContinueEnabled(!a.flow && !a.reassemble);
 		this.updateStepDots();
 		this.relayout();
+		if (this._awaitIntro) this.setCardFade(0);
+		else this.beginCardFade();
 		this.fire('step', st.id);
 		return st;
 	}
@@ -780,8 +829,8 @@ export class Lesson {
 		this.model.clearLook();
 		this.model.scatter();
 		this.model.setFactor(0);
-		this.enterStep(0);
 		this.startIntro();
+		this.enterStep(0);
 	}
 
 	hoverPart(id) {
@@ -1272,12 +1321,14 @@ export class Lesson {
 
 		if (this.video?.isOpen) this.video.update(dt);
 		this.tickIntro(dt);
+		this.tickCardFade(dt);
 		if (this.quiz) this.placeQuizNearRA();
 
 		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
 		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed
 		// tilt made it read edge-on at the edge of the Quest field of view.
 		for (const head of this.uiParts) head.quaternion.copy(camQ);
+		if (this.intro?.visible) this.intro.quaternion.copy(camQ);
 
 		const perHand = {};
 		let best = null;
