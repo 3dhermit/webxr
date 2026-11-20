@@ -165,20 +165,33 @@ export class Lesson {
 		const hudW = 0.088;
 		const hudH = 0.026;
 		const hudFs = 0.012;
-		this.continueBtn = makeButton({ label: 'Continue', width: hudW, height: hudH, fontSize: hudFs });
+		this.continueBtn = makeButton({
+			label: 'Continue',
+			width: hudW * 1.18,
+			height: hudH * 1.18,
+			fontSize: hudFs * 1.18,
+		});
+		this.continueBtn.userData.plate.material = new THREE.MeshBasicMaterial({
+			color: 0x22c55e,
+			transparent: true,
+			opacity: 1,
+			depthTest: false,
+			depthWrite: false,
+		});
+		this.continueBtn.userData.plate.renderOrder = 28;
+		this.continueBtn.userData.caption.position.z = 0.012;
 		this.playBtn = makeButton({ label: 'Play video', width: hudW, height: hudH, fontSize: hudFs });
 		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
 		this.hudBtns.position.set(0, 0, -0.5);
-		this.continueBtn.position.set(0.19, -0.28, 0);
-		this.playBtn.position.set(-0.19, -0.28, 0);
-		this.passBtn.position.set(0, -0.28, 0);
+		this.playBtn.position.set(-0.19, -0.34, 0);
+		this.passBtn.position.set(0.19, -0.34, 0);
 		this.restartBtn = makeButton({ label: 'Restart', width: hudW, height: hudH, fontSize: hudFs });
-		this.restartBtn.position.set(0, -0.38, 0);
+		this.restartBtn.position.set(0, -0.44, 0);
 		this.yesBtn = makeButton({ label: 'Yes', width: hudW, height: hudH, fontSize: hudFs });
 		this.noBtn = makeButton({ label: 'No', width: hudW, height: hudH, fontSize: hudFs });
-		this.yesBtn.position.set(-0.1, -0.38, 0);
-		this.noBtn.position.set(0.1, -0.38, 0);
+		this.yesBtn.position.set(-0.1, -0.44, 0);
+		this.noBtn.position.set(0.1, -0.44, 0);
 		this.yesBtn.visible = false;
 		this.noBtn.visible = false;
 		this.restartAsk = makeText({
@@ -191,11 +204,12 @@ export class Lesson {
 		});
 		this.restartAsk.text = 'Restart?';
 		this.restartAsk.sync();
-		this.restartAsk.position.set(0, -0.348, 0.008);
+		this.restartAsk.position.set(0, -0.408, 0.008);
 		this.restartAsk.visible = false;
 		this.restartAsk.material.depthTest = false;
 		this.restartAsk.renderOrder = 41;
-		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn, this.restartBtn, this.yesBtn, this.noBtn, this.restartAsk);
+		this.hudBtns.add(this.playBtn, this.passBtn, this.restartBtn, this.yesBtn, this.noBtn, this.restartAsk);
+		this.player.add(this.continueBtn);
 		this.buildStepDots();
 		this.buildIntro();
 		this.camera.add(this.hudBtns);
@@ -293,7 +307,7 @@ export class Lesson {
 	/** Five dots above the HUD chips. Progress is the dots, not "Step 3 of 5" copy. */
 	buildStepDots() {
 		this.stepDots = new THREE.Group();
-		this.stepDots.position.set(0, -0.252, 0);
+		this.stepDots.position.set(0, -0.31, 0);
 		this.hudBtns.add(this.stepDots);
 		const n = this.steps.length;
 		const gap = 0.014;
@@ -347,6 +361,7 @@ export class Lesson {
 	startIntro() {
 		this._awaitIntro = true;
 		this.setCardFade(0);
+		this.fadeContinue(false);
 		if (this.prompt) this.prompt.group.visible = false;
 		if (this.feedback) this.feedback.group.visible = false;
 		this.introTimer = 10;
@@ -399,6 +414,7 @@ export class Lesson {
 		if (this.feedback) this.feedback.group.visible = true;
 		this._cardFade = { from: 0, to: 1, t: 0, dur: 0.7 };
 		this.setCardFade(0);
+		if (this.continueOn) this.fadeContinue(true);
 	}
 
 	tickCardFade(dt) {
@@ -679,9 +695,56 @@ export class Lesson {
 
 	setContinueEnabled(on) {
 		this.continueOn = on;
-		this.continueBtn.userData.plate.material.color.setHex(on ? 0x2f6fb3 : 0x3a4550);
+		const plate = this.continueBtn.userData.plate;
+		plate.material.color.setHex(on ? 0x22c55e : 0x3a4550);
 		this.continueBtn.userData.caption.color = on ? 0xffffff : 0x8a97a3;
 		this.continueBtn.userData.caption.sync();
+		if (!this.quiz && !this._awaitIntro) this.fadeContinue(on);
+		else if (!on) this.fadeContinue(false);
+	}
+
+	fadeContinue(show) {
+		const from = this._contOp ?? (show ? 0 : 1);
+		this._continuePick = !!show;
+		this._contFade = { from, to: show ? 1 : 0, t: 0, dur: show ? 0.25 : 0.2 };
+		this.continueBtn.visible = true;
+	}
+
+	setContinueFade(k) {
+		const t = Math.max(0, Math.min(1, k));
+		this._contOp = t;
+		const plate = this.continueBtn?.userData?.plate;
+		if (plate?.material) {
+			plate.material.transparent = true;
+			plate.material.opacity = t;
+		}
+		if (this.continueBtn?.userData?.caption) this.continueBtn.userData.caption.fillOpacity = t;
+		this._contY = 0.008 * (1 - t);
+	}
+
+	tickContinueFade(dt) {
+		if (!this._contFade) return;
+		this._contFade.t += dt;
+		const dur = this._contFade.dur;
+		const k = Math.min(1, this._contFade.t / dur);
+		const e = this._contFade.to === 1 ? 1 - (1 - k) * (1 - k) : k;
+		this.setContinueFade(this._contFade.from + (this._contFade.to - this._contFade.from) * e);
+		if (k >= 1) this._contFade = null;
+	}
+
+	placeContinueOnHeart() {
+		if (!this.continueBtn || !this.model?.group) return;
+		const box = new THREE.Box3().setFromObject(this.model.group);
+		const c = box.getCenter(new THREE.Vector3());
+		const eye = this.camera.getWorldPosition(new THREE.Vector3());
+		const toward = eye.clone().sub(c);
+		if (toward.lengthSq() < 1e-8) toward.set(0, 0, 1);
+		toward.normalize();
+		c.addScaledVector(toward, 0.12);
+		c.y += 0.02 + (this._contY || 0);
+		this.player.worldToLocal(c);
+		this.continueBtn.position.copy(c);
+		this.continueBtn.lookAt(0, this.ui.eyeY, 0);
 	}
 
 	tweenFactor(to, dur) {
@@ -714,7 +777,7 @@ export class Lesson {
 		if (!item) return false;
 		this.quiz = { n, item };
 		this.setContinueEnabled(false);
-		this.continueBtn.visible = false;
+		this.fadeContinue(false);
 		this.playBtn.visible = false;
 		if (this.passBtn) this.passBtn.visible = false;
 		this.prompt.group.visible = false;
@@ -761,7 +824,7 @@ export class Lesson {
 		this.quiz = null;
 		this.quizHud.visible = false;
 		for (const b of this.quizBtns || []) b.visible = false;
-		this.continueBtn.visible = true;
+		this.fadeContinue(this.continueOn);
 		this.playBtn.visible = true;
 		if (this.passBtn) this.passBtn.visible = true;
 		this.prompt.group.visible = true;
@@ -1278,7 +1341,7 @@ export class Lesson {
 	}
 
 	uiFromRay() {
-		if (this.continueBtn.visible && this.ray.intersectObject(btnHit(this.continueBtn), false).length)
+		if (this.continueOn && this._continuePick !== false && this.continueBtn.visible && this.ray.intersectObject(btnHit(this.continueBtn), false).length)
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(btnHit(this.playBtn), false).length) return 'play';
 		if (this.passBtn?.visible && this.ray.intersectObject(btnHit(this.passBtn), false).length) return 'pass';
@@ -1411,6 +1474,8 @@ export class Lesson {
 		if (this.video?.isOpen) this.video.update(dt);
 		this.tickIntro(dt);
 		this.tickCardFade(dt);
+		this.tickContinueFade(dt);
+		this.placeContinueOnHeart();
 		if (this.quiz) this.placeQuizNearRA();
 		this.clearCardsFromHeart();
 
