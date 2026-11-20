@@ -142,7 +142,9 @@ function onFrame(delta, _time, globals) {
 		else if (ui === 'continue') lesson.next();
 		else if (ui === 'play') lesson.openVideo();
 		else if (ui === 'pass') lesson.togglePassthrough();
-		else if (ui === 'restart') lesson.reset();
+		else if (ui === 'restart') lesson.askRestart();
+		else if (ui === 'restart-yes') lesson.confirmRestart();
+		else if (ui === 'restart-no') lesson.hideRestartConfirm();
 		else if (typeof ui === 'string' && ui.startsWith('quiz-')) lesson.answerQuiz(+ui.slice(5));
 		else lesson.select(lesson.hover);
 	}
@@ -161,7 +163,7 @@ function onFrame(delta, _time, globals) {
 		lesson._resetHold = (lesson._resetHold || 0) + delta;
 		if (lesson._resetHold >= 1.5) {
 			lesson._resetHold = 0;
-			lesson.reset();
+			lesson.askRestart();
 		}
 	} else {
 		lesson._resetHold = 0;

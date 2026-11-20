@@ -174,8 +174,28 @@ export class Lesson {
 		this.playBtn.position.set(-0.19, -0.28, 0);
 		this.passBtn.position.set(0, -0.28, 0);
 		this.restartBtn = makeButton({ label: 'Restart', width: hudW, height: hudH, fontSize: hudFs });
-		this.restartBtn.position.set(0, -0.322, 0);
-		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn, this.restartBtn);
+		this.restartBtn.position.set(0, -0.38, 0);
+		this.yesBtn = makeButton({ label: 'Yes', width: hudW, height: hudH, fontSize: hudFs });
+		this.noBtn = makeButton({ label: 'No', width: hudW, height: hudH, fontSize: hudFs });
+		this.yesBtn.position.set(-0.1, -0.38, 0);
+		this.noBtn.position.set(0.1, -0.38, 0);
+		this.yesBtn.visible = false;
+		this.noBtn.visible = false;
+		this.restartAsk = makeText({
+			fontSize: hudFs,
+			maxWidth: 0.28,
+			anchorX: 'center',
+			anchorY: 'middle',
+			align: 'center',
+			color: 0xffffff,
+		});
+		this.restartAsk.text = 'Restart?';
+		this.restartAsk.sync();
+		this.restartAsk.position.set(0, -0.348, 0.008);
+		this.restartAsk.visible = false;
+		this.restartAsk.material.depthTest = false;
+		this.restartAsk.renderOrder = 41;
+		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn, this.restartBtn, this.yesBtn, this.noBtn, this.restartAsk);
 		this.buildStepDots();
 		this.buildIntro();
 		this.camera.add(this.hudBtns);
@@ -842,6 +862,7 @@ export class Lesson {
 
 	/** Reset for the next student: full state wipe, no records kept anywhere. */
 	reset() {
+		this.hideRestartConfirm();
 		// A classroom reset must leave no residue for the next student. Flow counters, highlights,
 		// tweens and per-part scatter flags used to survive, so the next student inherited the last
 		// student's progress as the first thing they saw.
@@ -1089,6 +1110,8 @@ export class Lesson {
 			this.playBtn,
 			this.passBtn,
 			this.restartBtn,
+			this.yesBtn,
+			this.noBtn,
 			this.hudBtns,
 			this.labelGroup,
 			this.lineGroup,
@@ -1215,6 +1238,30 @@ export class Lesson {
 		return this.lastHand;
 	}
 
+	askRestart() {
+		this._restartAsk = true;
+		if (this.restartBtn) this.restartBtn.visible = false;
+		if (this.yesBtn) this.yesBtn.visible = true;
+		if (this.noBtn) this.noBtn.visible = true;
+		if (this.restartAsk) this.restartAsk.visible = true;
+		return true;
+	}
+
+	hideRestartConfirm() {
+		this._restartAsk = false;
+		if (this.restartBtn) this.restartBtn.visible = true;
+		if (this.yesBtn) this.yesBtn.visible = false;
+		if (this.noBtn) this.noBtn.visible = false;
+		if (this.restartAsk) this.restartAsk.visible = false;
+		return true;
+	}
+
+	confirmRestart() {
+		this.hideRestartConfirm();
+		this.reset();
+		return true;
+	}
+
 	togglePassthrough() {
 		this.passthrough = !this.passthrough;
 		if (this.sky) this.sky.visible = !this.passthrough;
@@ -1235,6 +1282,8 @@ export class Lesson {
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(btnHit(this.playBtn), false).length) return 'play';
 		if (this.passBtn?.visible && this.ray.intersectObject(btnHit(this.passBtn), false).length) return 'pass';
+		if (this.yesBtn?.visible && this.ray.intersectObject(btnHit(this.yesBtn), false).length) return 'restart-yes';
+		if (this.noBtn?.visible && this.ray.intersectObject(btnHit(this.noBtn), false).length) return 'restart-no';
 		if (this.restartBtn?.visible && this.ray.intersectObject(btnHit(this.restartBtn), false).length) return 'restart';
 		if (this.quiz) {
 			for (let i = 0; i < this.quizBtns.length; i++) {
@@ -1272,6 +1321,14 @@ export class Lesson {
 		}
 		if (ui === 'restart') {
 			const hit = this.ray.intersectObject(btnHit(this.restartBtn), false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'restart-yes') {
+			const hit = this.ray.intersectObject(btnHit(this.yesBtn), false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'restart-no') {
+			const hit = this.ray.intersectObject(btnHit(this.noBtn), false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui && ui.startsWith('quiz-')) {
