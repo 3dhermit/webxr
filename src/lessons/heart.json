@@ -243,7 +243,7 @@
       "outcome": "o2",
       "action": {
         "flow": true,
-        "explode": 0.55,
+        "explode": 1,
         "labels": "none",
         "hoverNames": false
       },
