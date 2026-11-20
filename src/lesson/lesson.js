@@ -208,11 +208,11 @@ export class Lesson {
 		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
 		this.hudBtns.position.set(0, 0, -0.5);
-		this.continueBtn.position.set(0.06, -0.28, 0);
-		this.playBtn.position.set(-0.18, -0.28, 0);
-		this.passBtn.position.set(-0.06, -0.28, 0);
+		this.continueBtn.position.set(0.11, -0.28, 0);
+		this.playBtn.position.set(-0.11, -0.28, 0);
+		this.passBtn.position.set(0, -0.28, 0);
 		this.restartBtn = makeButton({ label: 'Restart', width: hudW, height: hudH, fontSize: hudFs });
-		this.restartBtn.position.set(0.18, -0.28, 0);
+		this.restartBtn.position.set(0, -0.312, 0);
 		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn, this.restartBtn);
 		this.buildStepDots();
 		this.buildIntro();
@@ -239,23 +239,22 @@ export class Lesson {
 	}
 
 	/**
-	 * Head-locked quiz overlay. Parent is the XR camera so the card inherits yaw/pitch/roll
-	 * with zero lag — no world position, no billboard copy, no lerp. 0.8 m in front of the
-	 * eye (body copy, not the 0.5 m icon HUD). Camera near is 0.1 m so it does not clip. Type is sized for
-	 * Quest 2 (~18.5 px/deg): heading 32 px, body 24 px.
+	 * Quiz card lives in player space, parked to the left of the exploded right atrium.
+	 * Not camera-parented — that glued it to the gaze and covered the HUD. Type is sized for
+	 * Quest 2 (~18.5 px/deg): heading 42 px, body 30 px, answers 28 px.
 	 */
 	buildQuizHud() {
 		const dist = 0.8;
 		const px = (pxSize) => dist * Math.tan(((pxSize / 18.5) * Math.PI) / 180);
 		this.quizDist = dist;
+		this.quizCardW = 0.4;
 		this.quizHud = new THREE.Group();
-		this.quizHud.position.set(0, 0, -dist);
 		this.quizHud.visible = false;
-		this.camera.add(this.quizHud);
+		this.player.add(this.quizHud);
 
-		const cardW = 0.36;
+		const cardW = this.quizCardW;
 		this.quizBack = new THREE.Mesh(
-			new THREE.PlaneGeometry(cardW, 0.32),
+			new THREE.PlaneGeometry(cardW, 0.16),
 			new THREE.MeshBasicMaterial({
 				color: 0x101418,
 				transparent: true,
@@ -264,43 +263,45 @@ export class Lesson {
 				depthWrite: false,
 			}),
 		);
-		this.quizBack.position.z = -0.01;
-		this.quizBack.renderOrder = 10;
+		this.quizBack.position.set(0, 0.08, -0.02);
+		this.quizBack.renderOrder = 8;
 		this.quizBack.raycast = () => {};
 
 		this.quizTitle = makeText({
-			fontSize: px(32),
+			fontSize: px(42),
 			maxWidth: cardW - 0.04,
 			anchorX: 'center',
 			anchorY: 'bottom',
 			align: 'center',
 			color: 0xffffff,
+			lineHeight: 1.3,
 		});
 		this.quizBody = makeText({
-			fontSize: px(24),
+			fontSize: px(30),
 			maxWidth: cardW - 0.04,
 			anchorX: 'center',
 			anchorY: 'top',
 			align: 'center',
 			color: 0xf2f2f2,
+			lineHeight: 1.35,
 		});
-		this.quizTitle.position.set(0, 0.1, 0.012);
-		this.quizBody.position.set(0, 0.088, 0.012);
+		this.quizTitle.position.set(0, 0.14, 0.02);
+		this.quizBody.position.set(0, 0.12, 0.02);
 		this.liftQuizText();
 		this.quizHud.add(this.quizBack, this.quizTitle, this.quizBody);
 
 		this.quizBtns = [];
-		const bw = 0.155;
-		const bh = 0.042;
+		const bw = 0.18;
+		const bh = 0.05;
 		for (let i = 0; i < 4; i++) {
-			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(24), hitScale: 1.25 });
-			b.userData.plate.material = new THREE.MeshBasicMaterial({ color: 0x2f6fb3, depthTest: false, depthWrite: false });
-			b.userData.plate.renderOrder = 31;
-			if (b.userData.caption) {
-				b.userData.caption.renderOrder = 33;
-				b.userData.caption.material.depthTest = false;
-				b.userData.caption.material.depthWrite = false;
-			}
+			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(28), hitScale: 1.2 });
+			b.userData.plate.material = new THREE.MeshBasicMaterial({
+				color: 0x2f6fb3,
+				depthTest: false,
+				depthWrite: false,
+			});
+			b.userData.plate.renderOrder = 40;
+			b.userData.caption.position.z = 0.02;
 			b.visible = false;
 			this.quizHud.add(b);
 			this.quizBtns.push(b);
@@ -668,18 +669,19 @@ export class Lesson {
 		});
 		this.liftQuizText();
 		this.quizHud.visible = true;
+		this.placeQuizNearRA();
 		return true;
 	}
 
 	/** Choice plates in camera-local space, under the question, never in world space. */
 	placeQuizBtns() {
-		const bw = 0.155;
-		const bh = 0.042;
-		const gap = 0.012;
+		const bw = 0.18;
+		const bh = 0.05;
+		const gap = 0.014;
 		this.quizBtns.forEach((b, i) => {
 			const col = i % 2;
 			const row = Math.floor(i / 2);
-			b.position.set((col ? 1 : -1) * (bw / 2 + gap), -0.055 - row * (bh + gap), 0.002);
+			b.position.set((col ? 1 : -1) * (bw / 2 + gap), -0.04 - row * (bh + gap), 0.03);
 		});
 	}
 
@@ -703,7 +705,7 @@ export class Lesson {
 	liftQuizText() {
 		for (const t of [this.quizTitle, this.quizBody]) {
 			if (!t) continue;
-			t.renderOrder = 32;
+			t.renderOrder = 45;
 			t.material.depthTest = false;
 			t.material.depthWrite = false;
 			t.material.transparent = true;
@@ -711,10 +713,28 @@ export class Lesson {
 		for (const b of this.quizBtns || []) {
 			const cap = b.userData?.caption;
 			if (!cap) continue;
-			cap.renderOrder = 33;
+			cap.renderOrder = 50;
 			cap.material.depthTest = false;
 			cap.material.depthWrite = false;
+			cap.material.transparent = true;
+			if (b.userData.plate) b.userData.plate.renderOrder = 40;
 		}
+	}
+
+	/** Park the quiz to the left of the right atrium (viewer-left of RA). */
+	placeQuizNearRA() {
+		if (!this.quizHud?.visible) return;
+		const ra = this.model.center('UBERON:0002078');
+		const rad = this.model.radius('UBERON:0002078') || 0.05;
+		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
+		const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camQ);
+		const cardW = this.quizCardW || 0.4;
+		const gap = 0.03;
+		const pos = ra.clone().addScaledVector(right, -(rad + gap + cardW / 2));
+		this.player.worldToLocal(pos);
+		this.quizHud.position.copy(pos);
+		const parentQ = this.player.getWorldQuaternion(new THREE.Quaternion());
+		this.quizHud.quaternion.copy(parentQ.invert()).multiply(camQ);
 	}
 
 	answerQuiz(i) {
@@ -1281,6 +1301,7 @@ export class Lesson {
 
 		if (this.video?.isOpen) this.video.update(dt);
 		this.tickIntro(dt);
+		if (this.quiz) this.placeQuizNearRA();
 
 		const camQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
 		// Panels and the Continue plate face the head. The plate sits ~0.4 m off-axis, and a fixed
