@@ -142,6 +142,7 @@ function onFrame(delta, _time, globals) {
 		else if (ui === 'continue') lesson.next();
 		else if (ui === 'play') lesson.openVideo();
 		else if (ui === 'pass') lesson.togglePassthrough();
+		else if (ui === 'restart') lesson.reset();
 		else if (typeof ui === 'string' && ui.startsWith('quiz-')) lesson.answerQuiz(+ui.slice(5));
 		else lesson.select(lesson.hover);
 	}

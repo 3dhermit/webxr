@@ -67,8 +67,11 @@ export class AnatomyModel {
 				mesh.material = mesh.material.clone();
 				mesh.material.color.setHex(0xffffff);
 				if ('metalness' in mesh.material) mesh.material.metalness = 0;
+				mesh.material.side = THREE.DoubleSide;
 				mesh.material.transparent = false;
 				mesh.material.opacity = 1;
+				mesh.material.depthWrite = true;
+				mesh.material.needsUpdate = true;
 				mesh.userData.partId = spec.id;
 
 			inv.copy(mesh.parent.matrixWorld).invert();
@@ -419,6 +422,7 @@ export class AnatomyModel {
 				p.mat.transparent = !on;
 				p.mat.opacity = on ? 1 : contextOpacity;
 				p.mat.depthWrite = on;
+				p.mat.needsUpdate = true;
 		}
 	}
 
@@ -429,16 +433,20 @@ export class AnatomyModel {
 				p.mat.transparent = true;
 				p.mat.opacity = opacity;
 				p.mat.depthWrite = false;
+				p.mat.needsUpdate = true;
 			}
 		}
 	}
 
 	clearLook() {
 		for (const p of this.parts.values()) {
+			p.mat.side = THREE.DoubleSide;
 			p.mat.transparent = false;
 			p.mat.opacity = 1;
 			p.mat.depthWrite = true;
+			p.mat.depthTest = true;
 			p.mat.emissive.setHex(0x000000);
+			p.mat.needsUpdate = true;
 		}
 	}
 

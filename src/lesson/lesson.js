@@ -208,10 +208,12 @@ export class Lesson {
 		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
 		this.hudBtns.position.set(0, 0, -0.5);
-		this.continueBtn.position.set(0.08, -0.2, 0);
-		this.playBtn.position.set(-0.08, -0.2, 0);
-		this.passBtn.position.set(0, -0.2, 0);
-		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn);
+		this.continueBtn.position.set(0.06, -0.28, 0);
+		this.playBtn.position.set(-0.18, -0.28, 0);
+		this.passBtn.position.set(-0.06, -0.28, 0);
+		this.restartBtn = makeButton({ label: 'Restart', width: hudW, height: hudH, fontSize: hudFs });
+		this.restartBtn.position.set(0.18, -0.28, 0);
+		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn, this.restartBtn);
 		this.buildStepDots();
 		this.buildIntro();
 		this.camera.add(this.hudBtns);
@@ -262,8 +264,8 @@ export class Lesson {
 				depthWrite: false,
 			}),
 		);
-		this.quizBack.position.z = -0.006;
-		this.quizBack.renderOrder = 30;
+		this.quizBack.position.z = -0.01;
+		this.quizBack.renderOrder = 10;
 		this.quizBack.raycast = () => {};
 
 		this.quizTitle = makeText({
@@ -282,8 +284,9 @@ export class Lesson {
 			align: 'center',
 			color: 0xf2f2f2,
 		});
-		this.quizTitle.position.set(0, 0.1, 0.008);
-		this.quizBody.position.set(0, 0.088, 0.008);
+		this.quizTitle.position.set(0, 0.1, 0.012);
+		this.quizBody.position.set(0, 0.088, 0.012);
+		this.liftQuizText();
 		this.quizHud.add(this.quizBack, this.quizTitle, this.quizBody);
 
 		this.quizBtns = [];
@@ -293,6 +296,11 @@ export class Lesson {
 			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(24), hitScale: 1.25 });
 			b.userData.plate.material = new THREE.MeshBasicMaterial({ color: 0x2f6fb3, depthTest: false, depthWrite: false });
 			b.userData.plate.renderOrder = 31;
+			if (b.userData.caption) {
+				b.userData.caption.renderOrder = 33;
+				b.userData.caption.material.depthTest = false;
+				b.userData.caption.material.depthWrite = false;
+			}
 			b.visible = false;
 			this.quizHud.add(b);
 			this.quizBtns.push(b);
@@ -302,7 +310,7 @@ export class Lesson {
 	/** Five dots above the HUD chips. Progress is the dots, not "Step 3 of 5" copy. */
 	buildStepDots() {
 		this.stepDots = new THREE.Group();
-		this.stepDots.position.set(0, -0.172, 0);
+		this.stepDots.position.set(0, -0.252, 0);
 		this.hudBtns.add(this.stepDots);
 		const n = this.steps.length;
 		const gap = 0.014;
@@ -649,6 +657,7 @@ export class Lesson {
 		this.quizTitle.sync();
 		this.quizBody.text = item.q;
 		this.quizBody.sync();
+		this.liftQuizText();
 		this.placeQuizBtns();
 		item.choices.forEach((c, i) => {
 			const b = this.quizBtns[i];
@@ -657,6 +666,7 @@ export class Lesson {
 			b.userData.caption.sync();
 			b.visible = true;
 		});
+		this.liftQuizText();
 		this.quizHud.visible = true;
 		return true;
 	}
@@ -686,6 +696,25 @@ export class Lesson {
 		this.labelGroup.visible = a.labels === 'core' || Array.isArray(a.labels);
 		this.lineGroup.visible = this.labelGroup.visible;
 		this.waypointGroup.visible = !!a.flow;
+		this.model.forceOpaque();
+	}
+
+	/** Troika rebuilds materials on sync — keep type above the dark plate. */
+	liftQuizText() {
+		for (const t of [this.quizTitle, this.quizBody]) {
+			if (!t) continue;
+			t.renderOrder = 32;
+			t.material.depthTest = false;
+			t.material.depthWrite = false;
+			t.material.transparent = true;
+		}
+		for (const b of this.quizBtns || []) {
+			const cap = b.userData?.caption;
+			if (!cap) continue;
+			cap.renderOrder = 33;
+			cap.material.depthTest = false;
+			cap.material.depthWrite = false;
+		}
 	}
 
 	answerQuiz(i) {
@@ -987,6 +1016,7 @@ export class Lesson {
 			this.continueBtn,
 			this.playBtn,
 			this.passBtn,
+			this.restartBtn,
 			this.hudBtns,
 			this.labelGroup,
 			this.lineGroup,
@@ -1133,6 +1163,7 @@ export class Lesson {
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(btnHit(this.playBtn), false).length) return 'play';
 		if (this.passBtn?.visible && this.ray.intersectObject(btnHit(this.passBtn), false).length) return 'pass';
+		if (this.restartBtn?.visible && this.ray.intersectObject(btnHit(this.restartBtn), false).length) return 'restart';
 		if (this.quiz) {
 			for (let i = 0; i < this.quizBtns.length; i++) {
 				const b = this.quizBtns[i];
@@ -1165,6 +1196,10 @@ export class Lesson {
 		}
 		if (ui === 'pass') {
 			const hit = this.ray.intersectObject(btnHit(this.passBtn), false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'restart') {
+			const hit = this.ray.intersectObject(btnHit(this.restartBtn), false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui && ui.startsWith('quiz-')) {
