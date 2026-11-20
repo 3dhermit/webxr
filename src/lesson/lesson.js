@@ -200,19 +200,19 @@ export class Lesson {
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
 		// Tiny stand-ins — later swapped for designed image plates.
-		const hudW = 0.05;
-		const hudH = 0.016;
-		const hudFs = 0.007;
+		const hudW = 0.088;
+		const hudH = 0.026;
+		const hudFs = 0.012;
 		this.continueBtn = makeButton({ label: 'Continue', width: hudW, height: hudH, fontSize: hudFs });
 		this.playBtn = makeButton({ label: 'Play video', width: hudW, height: hudH, fontSize: hudFs });
 		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
 		this.hudBtns.position.set(0, 0, -0.5);
-		this.continueBtn.position.set(0.11, -0.28, 0);
-		this.playBtn.position.set(-0.11, -0.28, 0);
+		this.continueBtn.position.set(0.19, -0.28, 0);
+		this.playBtn.position.set(-0.19, -0.28, 0);
 		this.passBtn.position.set(0, -0.28, 0);
 		this.restartBtn = makeButton({ label: 'Restart', width: hudW, height: hudH, fontSize: hudFs });
-		this.restartBtn.position.set(0, -0.312, 0);
+		this.restartBtn.position.set(0, -0.322, 0);
 		this.hudBtns.add(this.continueBtn, this.playBtn, this.passBtn, this.restartBtn);
 		this.buildStepDots();
 		this.buildIntro();
