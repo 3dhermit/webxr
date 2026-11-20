@@ -76,7 +76,7 @@ export class Panel {
 		);
 		this.back.position.z = -0.002;
 		this.group.add(this.back, this.text);
-		this.text.position.set(-width / 2 + padding, 0, 0);
+		this.text.position.set(-width / 2 + padding, 0, 0.008);
 		this.text.anchorX = 'left';
 		this.text.anchorY = 'top';
 		this.width = width;
@@ -169,6 +169,7 @@ export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02
 	caption.text = label;
 	caption.sync();
 	g.add(plate, caption);
+	caption.position.z = 0.006;
 	g.userData.plate = plate;
 	g.userData.caption = caption;
 	return g;

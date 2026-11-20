@@ -183,7 +183,7 @@ export class Lesson {
 	}
 
 	buildUI() {
-		const { panelW, panelZ, promptText, feedText, btnX, btnY, btnW, eyeY } = this.ui;
+		const { panelW, panelZ, promptText, feedText, btnW, eyeY } = this.ui;
 		// One panel carries the step counter inside it. A separate floating counter line printed
 		// straight through the prompt panel and read as doubled text.
 		this.prompt = new Panel({ width: panelW, fontSize: promptText });
@@ -198,10 +198,15 @@ export class Lesson {
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
 		this.continueBtn = makeButton({ label: 'Continue  (trigger)', width: btnW, height: btnW * 0.26 });
-		this.continueBtn.position.set(btnX, btnY - 0.14, panelZ);
 		this.playBtn = makeButton({ label: 'Play video', width: btnW, height: btnW * 0.26 });
-		this.playBtn.position.set(-btnX, btnY, panelZ);
-		this.root.add(this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn);
+		// Head-locked at 0.5 m so both plates stay near the eyes and do not sit on the heart.
+		this.hudBtns = new THREE.Group();
+		this.hudBtns.position.set(0, 0, -0.5);
+		this.continueBtn.position.set(0.13, -0.18, 0);
+		this.playBtn.position.set(-0.13, -0.18, 0);
+		this.hudBtns.add(this.continueBtn, this.playBtn);
+		this.camera.add(this.hudBtns);
+		this.root.add(this.prompt.group, this.feedback.group);
 
 		this.quiz = null;
 		this._quizDone = false;
@@ -209,7 +214,7 @@ export class Lesson {
 
 		// Panels face the reader's eye height here, then track the head in update(). The Continue
 		// plate sits well off-axis, so a fixed tilt made it read edge-on at the frame edge.
-		this.uiParts = [this.prompt.group, this.feedback.group, this.continueBtn, this.playBtn];
+		this.uiParts = [this.prompt.group, this.feedback.group];
 		for (const head of this.uiParts) head.lookAt(0, eyeY, 0);
 
 		// World-locked lecture clip. Not tied to a step: the Play video plate is always available.
@@ -268,8 +273,8 @@ export class Lesson {
 			align: 'center',
 			color: 0xf2f2f2,
 		});
-		this.quizTitle.position.set(0, 0.1, 0);
-		this.quizBody.position.set(0, 0.088, 0);
+		this.quizTitle.position.set(0, 0.1, 0.008);
+		this.quizBody.position.set(0, 0.088, 0.008);
 		this.quizHud.add(this.quizBack, this.quizTitle, this.quizBody);
 
 		this.quizBtns = [];
@@ -897,6 +902,7 @@ export class Lesson {
 			this.feedback.group,
 			this.continueBtn,
 			this.playBtn,
+			this.hudBtns,
 			this.labelGroup,
 			this.lineGroup,
 			this.waypointGroup,
