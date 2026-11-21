@@ -698,7 +698,7 @@ export class Lesson {
 		const plate = this.continueBtn.userData.plate;
 		plate.material.color.setHex(on ? 0x22c55e : 0x3a4550);
 		this.continueBtn.userData.caption.color = on ? 0xffffff : 0x8a97a3;
-		this.continueBtn.userData.caption.sync();
+		this.continueBtn.userData.caption.sync(() => this.applyContinueCaption(this._contOp ?? (on ? 1 : 0)));
 		if (!this.quiz && !this._awaitIntro) this.fadeContinue(on);
 		else if (!on) this.fadeContinue(false);
 	}
@@ -718,8 +718,24 @@ export class Lesson {
 			plate.material.transparent = true;
 			plate.material.opacity = t;
 		}
-		if (this.continueBtn?.userData?.caption) this.continueBtn.userData.caption.fillOpacity = t;
+		this.applyContinueCaption(t);
 		this._contY = 0.008 * (1 - t);
+	}
+
+	applyContinueCaption(t) {
+		const cap = this.continueBtn?.userData?.caption;
+		if (!cap) return;
+		cap.fillOpacity = t;
+		cap.outlineOpacity = 0.75 * t;
+		cap.strokeOpacity = t;
+		cap.traverse((o) => {
+			const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+			for (const m of mats) {
+				m.transparent = true;
+				m.opacity = t;
+				m.depthWrite = false;
+			}
+		});
 	}
 
 	tickContinueFade(dt) {
@@ -745,6 +761,28 @@ export class Lesson {
 		this.player.worldToLocal(c);
 		this.continueBtn.position.copy(c);
 		this.continueBtn.lookAt(0, this.ui.eyeY, 0);
+	}
+
+	/** Right of the heart, stacked above its centre; follows explode like the quiz card. */
+	placeInstructionCards() {
+		if (this._awaitIntro || this.quiz) return;
+		if (!this.model?.group) return;
+		if (!this.prompt?.group.visible && !this.feedback?.group.visible) return;
+		const box = new THREE.Box3().setFromObject(this.model.group);
+		const c = box.getCenter(new THREE.Vector3());
+		const size = box.getSize(new THREE.Vector3());
+		const cardW = this.ui.panelW || 0.38;
+		const gap = 0.05;
+		const ph = this.prompt.height || 0.04;
+		const fh = this.feedback.height || 0;
+		const stack = ph + (fh ? 0.012 + fh : 0);
+		const pos = c.clone();
+		pos.x += size.x * 0.5 + gap + cardW * 0.5;
+		pos.y += size.y * 0.35;
+		this.player.worldToLocal(pos);
+		const bottom = pos.y - stack * 0.5;
+		this.feedback.group.position.set(pos.x, bottom + fh, pos.z);
+		this.prompt.group.position.set(pos.x, bottom + fh + (fh ? 0.012 : 0) + ph, pos.z);
 	}
 
 	tweenFactor(to, dur) {
@@ -1476,6 +1514,7 @@ export class Lesson {
 		this.tickCardFade(dt);
 		this.tickContinueFade(dt);
 		this.placeContinueOnHeart();
+		this.placeInstructionCards();
 		if (this.quiz) this.placeQuizNearRA();
 		this.clearCardsFromHeart();
 
