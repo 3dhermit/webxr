@@ -159,6 +159,11 @@ export class Lesson {
 		this.feedback.onfit = () => this.relayout();
 		this.prompt.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
 		this.feedback.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
+		this.promptSpeaker = this.buildSpeakerIcon();
+		this.promptSpeaker.position.set(-this.ui.panelW * 0.5 - 0.04, -0.02, 0.02);
+		this.prompt.group.add(this.promptSpeaker);
+		this.promptAudio = new Audio('assets/audio/s1-orient.wav');
+		this.promptAudio.preload = 'auto';
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
 		// Tiny stand-ins — later swapped for designed image plates.
@@ -332,7 +337,63 @@ export class Lesson {
 		});
 	}
 
-	/** Centered in front of the heart — plays first, before the step card fades up. */
+	/** White speaker cone + hit plate. Trigger plays the clip (user-gesture unlock). */
+	buildSpeakerIcon() {
+		const g = new THREE.Group();
+		const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, depthWrite: false });
+		const body = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.02, 0.01), mat);
+		const horn = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.018, 8), mat);
+		horn.rotation.z = -Math.PI / 2;
+		horn.position.x = 0.014;
+		const w1 = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.002, 6, 10, Math.PI), mat);
+		w1.rotation.set(0, 0, -Math.PI / 2);
+		w1.position.x = 0.028;
+		const w2 = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.002, 6, 10, Math.PI), mat);
+		w2.rotation.set(0, 0, -Math.PI / 2);
+		w2.position.x = 0.032;
+		const hit = new THREE.Mesh(
+			new THREE.PlaneGeometry(0.07, 0.07),
+			new THREE.MeshBasicMaterial({ visible: false, depthTest: false, depthWrite: false }),
+		);
+		hit.renderOrder = 43;
+		body.renderOrder = 42;
+		horn.renderOrder = 42;
+		w1.renderOrder = 42;
+		w2.renderOrder = 42;
+		g.add(body, horn, w1, w2, hit);
+		g.userData.hit = hit;
+		return g;
+	}
+
+	playClip(el) {
+		if (!el) return false;
+		if (!el.paused) {
+			el.pause();
+			el.currentTime = 0;
+			return true;
+		}
+		el.play().catch(() => {});
+		return true;
+	}
+
+	playIntroAudio() {
+		this.introTimer = Math.max(this.introTimer, 14);
+		return this.playClip(this.introAudio);
+	}
+
+	playPromptAudio() {
+		if (this.i !== 0) return false;
+		return this.playClip(this.promptAudio);
+	}
+
+	stopLessonAudio() {
+		for (const el of [this.introAudio, this.promptAudio]) {
+			if (!el) continue;
+			el.pause();
+			el.currentTime = 0;
+		}
+	}
+
 	buildIntro() {
 		this.intro = new THREE.Group();
 		this.intro.position.set(0, 1.4, -0.48);
@@ -353,6 +414,11 @@ export class Lesson {
 		this.introText.material.depthWrite = false;
 		this.introText.renderOrder = 42;
 		this.intro.add(this.introText);
+		this.introSpeaker = this.buildSpeakerIcon();
+		this.introSpeaker.position.set(-0.3, 0, 0.02);
+		this.intro.add(this.introSpeaker);
+		this.introAudio = new Audio('assets/audio/intro.wav');
+		this.introAudio.preload = 'auto';
 		this.intro.lookAt(0, 1.45, 0);
 		this.introTimer = 0;
 		this.startIntro();
@@ -373,6 +439,7 @@ export class Lesson {
 	dismissIntro() {
 		if (!this.intro?.visible && !this._awaitIntro) return;
 		this.introTimer = 0;
+		this.stopLessonAudio();
 	}
 
 	tickIntro(dt) {
@@ -578,6 +645,7 @@ export class Lesson {
 		this.setContinueEnabled(!a.flow && !a.reassemble);
 		this.updateStepDots();
 		this.relayout();
+		if (this.promptSpeaker) this.promptSpeaker.visible = this.i === 0;
 		if (this._awaitIntro) this.setCardFade(0);
 		else this.beginCardFade();
 		this.fire('step', st.id);
@@ -964,6 +1032,7 @@ export class Lesson {
 	/** Reset for the next student: full state wipe, no records kept anywhere. */
 	reset() {
 		this.hideRestartConfirm();
+		this.stopLessonAudio();
 		// A classroom reset must leave no residue for the next student. Flow counters, highlights,
 		// tweens and per-part scatter flags used to survive, so the next student inherited the last
 		// student's progress as the first thing they saw.
@@ -1379,6 +1448,10 @@ export class Lesson {
 	}
 
 	uiFromRay() {
+		if (this.intro?.visible && this.introSpeaker && this.ray.intersectObject(this.introSpeaker.userData.hit, false).length)
+			return 'intro-audio';
+		if (this.promptSpeaker?.visible && this.prompt?.group.visible && this.ray.intersectObject(this.promptSpeaker.userData.hit, false).length)
+			return 'prompt-audio';
 		if (this.continueOn && this._continuePick !== false && this.continueBtn.visible && this.ray.intersectObject(btnHit(this.continueBtn), false).length)
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(btnHit(this.playBtn), false).length) return 'play';
@@ -1408,6 +1481,14 @@ export class Lesson {
 			return { dist, ui, partId: null };
 		}
 		const ui = this.uiFromRay();
+		if (ui === 'intro-audio') {
+			const hit = this.ray.intersectObject(this.introSpeaker.userData.hit, false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'prompt-audio') {
+			const hit = this.ray.intersectObject(this.promptSpeaker.userData.hit, false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
 		if (ui === 'continue') {
 			const hit = this.ray.intersectObject(btnHit(this.continueBtn), false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };

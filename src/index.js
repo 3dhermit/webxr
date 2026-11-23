@@ -131,13 +131,21 @@ function onFrame(delta, _time, globals) {
 		const ct = controllers[hand];
 		if (!ct?.gamepad?.getButtonClick?.(XR_BUTTONS.TRIGGER)) continue;
 		lesson.lastHand = hand;
+		const ui = lesson.pickUi(controllers, hand);
+		if (ui === 'intro-audio') {
+			lesson.playIntroAudio();
+			continue;
+		}
+		if (ui === 'prompt-audio') {
+			lesson.playPromptAudio();
+			continue;
+		}
 		lesson.dismissIntro();
 		if (lesson.video?.isOpen) {
 			lesson.aim(ct);
 			lesson.videoHover = lesson.probe().ui;
 			if (lesson.pressVideo()) continue;
 		}
-		const ui = lesson.pickUi(controllers, hand);
 		if (lesson.done) lesson.reset();
 		else if (ui === 'continue') lesson.next();
 		else if (ui === 'play') lesson.openVideo();
