@@ -17,9 +17,12 @@ import { init } from './init.js';
 import lessonData from './lessons/heart.json';
 import { makeText } from './lesson/text.js';
 import registry from './assets/anatomy/parts.json';
+import { unlockMedia } from './lesson/audio.js';
 
 const params = new URLSearchParams(window.location.search);
 const DEBUG = params.get('debug') === '1';
+
+document.addEventListener('pointerdown', unlockMedia, true);
 
 let g; // { scene, camera, renderer, player, controllers }, filled by init()
 let model;
@@ -52,6 +55,7 @@ async function boot() {
 	status.visible = false;
 	lesson.enterStep(0);
 	ready = true;
+	if (g.renderer.xr.isPresenting) lesson.onXrStart();
 
 	// Dev hooks, student-mode-clean: a headset student gets no developer surface at all.
 	if (DEBUG) {
@@ -85,7 +89,10 @@ function setupScene({ scene, camera, renderer, player, controllers, controls, sk
 	}
 
 	// Quest 2 has a narrow lens sweet spot; fixed foveation buys resolution where the eye looks.
-	renderer.xr.addEventListener?.('sessionstart', () => renderer.xr.setFoveation?.(1));
+	renderer.xr.addEventListener?.('sessionstart', () => {
+		renderer.xr.setFoveation?.(1);
+		lesson?.onXrStart?.();
+	});
 
 	status = makeText({
 		fontSize: 0.03,

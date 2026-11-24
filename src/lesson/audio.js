@@ -76,11 +76,33 @@ async function urlExists(url) {
 	}
 }
 
+// One element for the whole lesson. Unlock it on the ENTER VR click (real user
+// gesture); later ClipBank.play() calls then survive Quest autoplay policy.
+const mediaEl = new Audio();
+mediaEl.preload = 'auto';
+
+const SILENCE = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
+export function unlockMedia() {
+	if (mediaEl.dataset.unlocked === '1') return;
+	const had = mediaEl.src;
+	if (!had) mediaEl.src = SILENCE;
+	mediaEl.muted = true;
+	const done = () => {
+		mediaEl.pause();
+		mediaEl.muted = false;
+		mediaEl.currentTime = 0;
+		mediaEl.dataset.unlocked = '1';
+	};
+	const p = mediaEl.play();
+	if (p && p.then) p.then(done).catch(() => { mediaEl.muted = false; });
+	else done();
+}
+
 export class ClipBank {
 	constructor() {
 		this.found = new Map();
-		this.el = new Audio();
-		this.el.preload = 'auto';
+		this.el = mediaEl;
 		this.queue = null;
 		this.qi = 0;
 	}

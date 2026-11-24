@@ -429,6 +429,19 @@ export class Lesson {
 		return this.clips.play(this.introClip);
 	}
 
+	/** English-man intro clip. No-op until the file is located and the intro is on screen. */
+	tryPlayIntroAudio() {
+		if (!this.introClip?.length) return false;
+		if (!(this._awaitIntro || this.intro?.visible)) return false;
+		return this.playIntroAudio();
+	}
+
+	/** ENTER VR is the start of the experience — speak the start instructions then. */
+	onXrStart() {
+		if (!(this._awaitIntro || this.intro?.visible)) this.startIntro();
+		this.tryPlayIntroAudio();
+	}
+
 	playPromptAudio() {
 		return this.clips.play(this.promptClip);
 	}
@@ -472,6 +485,7 @@ export class Lesson {
 	async bindIntroClip() {
 		this.introClip = await this.clips.locate(introStems());
 		if (this.introSpeaker) this.introSpeaker.visible = this.introClip.length > 0;
+		this.tryPlayIntroAudio();
 	}
 
 	async bindPromptClip(st) {
@@ -500,7 +514,7 @@ export class Lesson {
 			color: 0xffffff,
 			lineHeight: 1.35,
 		});
-		this.introText.text = 'Trigger = select / next\nSqueeze = pick up a part\nHold both grips to start over';
+		this.introText.text = 'Trigger is select or next.\nSqueeze to pick up a part.\nHold both grips to start over.';
 		this.introText.sync();
 		this.introText.material.depthTest = false;
 		this.introText.material.depthWrite = false;
@@ -527,6 +541,7 @@ export class Lesson {
 		if (this.intro) this.intro.visible = true;
 		if (this.introText) this.introText.fillOpacity = 0;
 		this._introFade = { from: 0, to: 1, t: 0, dur: 0.55 };
+		this.tryPlayIntroAudio();
 	}
 
 	dismissIntro() {
