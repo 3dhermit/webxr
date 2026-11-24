@@ -32,6 +32,7 @@ export class VideoScreen {
 		// opens and then stays put in the room, like a real screen. Head-follow (true) keeps
 		// the old lazy-follow behaviour for anyone who wants it back.
 		this.followHead = runtime.videoFollow ?? false;
+		this.dock = null;
 		// How far above or below eye level a world-locked screen may be placed. A clip is
 		// usually opened while looking DOWN at a callout on the heart; placed straight along
 		// that gaze it would sit low and tilted for its whole run.
@@ -285,6 +286,11 @@ export class VideoScreen {
 	 * parent, so local positions are the right space.
 	 */
 	placeOnce() {
+		if (this.dock) {
+			this.group.position.set(this.dock.x, this.dock.y, this.dock.z);
+			this.group.quaternion.identity();
+			return;
+		}
 		const cam = this.camera;
 		const camPos = this._v.copy(cam.position);
 		const fwd = this._fwd.set(0, 0, -1).applyQuaternion(cam.quaternion);

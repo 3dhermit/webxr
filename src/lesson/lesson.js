@@ -244,14 +244,16 @@ export class Lesson {
 		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
 		this.hudBtns.position.set(0, 0, -0.5);
-		this.playBtn.position.set(-0.19, -0.34, 0);
-		this.passBtn.position.set(0.19, -0.34, 0);
+		const hudY = -0.20;
+		const hudX = 0.19;
+		this.playBtn.position.set(-hudX, hudY, 0);
+		this.passBtn.position.set(0, hudY, 0);
 		this.restartBtn = makeButton({ label: 'Restart', width: hudW, height: hudH, fontSize: hudFs });
-		this.restartBtn.position.set(0, -0.44, 0);
+		this.restartBtn.position.set(hudX, hudY, 0);
 		this.yesBtn = makeButton({ label: 'Yes', width: hudW, height: hudH, fontSize: hudFs });
 		this.noBtn = makeButton({ label: 'No', width: hudW, height: hudH, fontSize: hudFs });
-		this.yesBtn.position.set(-0.1, -0.44, 0);
-		this.noBtn.position.set(0.1, -0.44, 0);
+		this.yesBtn.position.set(-0.1, hudY - 0.10, 0);
+		this.noBtn.position.set(0.1, hudY - 0.10, 0);
 		this.yesBtn.visible = false;
 		this.noBtn.visible = false;
 		this.restartAsk = makeText({
@@ -264,7 +266,7 @@ export class Lesson {
 		});
 		this.restartAsk.text = 'Restart?';
 		this.restartAsk.sync();
-		this.restartAsk.position.set(0, -0.408, 0.008);
+		this.restartAsk.position.set(0, hudY - 0.068, 0.008);
 		this.restartAsk.visible = false;
 		this.restartAsk.material.depthTest = false;
 		this.restartAsk.renderOrder = 41;
@@ -287,10 +289,16 @@ export class Lesson {
 		// World-locked lecture clip. Not tied to a step: the Play video plate is always available.
 		this.video = new VideoScreen({
 			camera: this.camera,
-			parent: this.player,
+			parent: this.camera,
 			videos: this.data.videos || {},
 			runtime: this.data.runtime || {},
 		});
+		// HUD-docked: same plane as the chips, to their right. Smaller than the old
+		// world-locked lecture screen so it sits next to Play / Passthrough / Restart.
+		this.video.dist = 0.5;
+		this.video.fovDeg = 16;
+		this.video.followHead = false;
+		this.video.dock = { x: 0.40, y: -0.20, z: -0.5 };
 		this.videoHover = null;
 	}
 
@@ -381,7 +389,7 @@ export class Lesson {
 	/** Five dots above the HUD chips. Progress is the dots, not "Step 3 of 5" copy. */
 	buildStepDots() {
 		this.stepDots = new THREE.Group();
-		this.stepDots.position.set(0, -0.31, 0);
+		this.stepDots.position.set(0, -0.13, 0);
 		this.hudBtns.add(this.stepDots);
 		const n = this.steps.length;
 		const gap = 0.014;
@@ -1402,13 +1410,6 @@ export class Lesson {
 		return [
 			this.prompt.group,
 			this.feedback.group,
-			this.continueBtn,
-			this.playBtn,
-			this.passBtn,
-			this.restartBtn,
-			this.yesBtn,
-			this.noBtn,
-			this.hudBtns,
 			this.labelGroup,
 			this.lineGroup,
 			this.waypointGroup,
@@ -1416,7 +1417,6 @@ export class Lesson {
 			this.hovLine,
 			this.selGroup,
 			this.selLine,
-			this.model.group,
 			this.quizHud,
 			this.intro,
 		];
