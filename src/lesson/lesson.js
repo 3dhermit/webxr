@@ -482,6 +482,8 @@ export class Lesson {
 	async bindQuizClip(n) {
 		this.quizClip = await this.clips.locate(quizStems(n));
 		if (this.quizSpeaker) this.quizSpeaker.visible = this.quizClip.length > 0;
+		// Play once the file is bound. Locate is async; skip if this quiz was already closed.
+		if (this.quiz && this.quiz.n === n) this.playQuizAudio();
 	}
 
 	buildIntro() {
@@ -1006,6 +1008,7 @@ export class Lesson {
 		});
 		this.liftQuizText();
 		this.quizHud.visible = true;
+		this.stopLessonAudio();
 		this.bindQuizClip(n);
 		this.placeQuizNearRA();
 		return true;
