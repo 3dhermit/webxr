@@ -140,6 +140,10 @@ function onFrame(delta, _time, globals) {
 			lesson.playPromptAudio();
 			continue;
 		}
+		if (ui === 'quiz-audio') {
+			lesson.playQuizAudio();
+			continue;
+		}
 		lesson.dismissIntro();
 		if (lesson.video?.isOpen) {
 			lesson.aim(ct);
@@ -147,12 +151,12 @@ function onFrame(delta, _time, globals) {
 			if (lesson.pressVideo()) continue;
 		}
 		if (lesson.done) lesson.reset();
-		else if (ui === 'continue') lesson.next();
-		else if (ui === 'play') lesson.openVideo();
-		else if (ui === 'pass') lesson.togglePassthrough();
-		else if (ui === 'restart') lesson.askRestart();
-		else if (ui === 'restart-yes') lesson.confirmRestart();
-		else if (ui === 'restart-no') lesson.hideRestartConfirm();
+		else if (ui === 'continue') { lesson.playClip('hud:continue'); lesson.next(); }
+		else if (ui === 'play') lesson.openVideo(); // openVideo speaks the video-title clip
+		else if (ui === 'pass') lesson.togglePassthrough(); // speaks the passthrough clip
+		else if (ui === 'restart') lesson.askRestart(); // speaks the restart-confirm clip
+		else if (ui === 'restart-yes') { lesson.playClip('hud:yes'); lesson.confirmRestart(); }
+		else if (ui === 'restart-no') { lesson.playClip('hud:no'); lesson.hideRestartConfirm(); }
 		else if (typeof ui === 'string' && ui.startsWith('quiz-')) lesson.answerQuiz(+ui.slice(5));
 		else lesson.select(lesson.hover);
 	}

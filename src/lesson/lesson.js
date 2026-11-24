@@ -4,7 +4,22 @@
  * Nothing is stored — the classroom rule is formative feedback only, no records, no accounts.
  */
 import * as THREE from 'three';
+import {
+	ClipBank,
+	doneStems,
+	feedbackStems,
+	hudStems,
+	introStems,
+	partStems,
+	promptStems,
+	quizStems,
+	quizWhyStems,
+	videoTitleStems,
+	vocabStems,
+	waypointStems,
+} from './audio.js';
 import { Panel, btnHit, makeButton, makeLabel, makeLeaderLine, makeText, setButtonLabel, updateLeaderLine } from './text.js';
+import { loadLessonScript, scriptJoin } from './script.js';
 import { VideoScreen } from './video.js';
 
 const OK = 0x8fe3a0;
@@ -93,13 +108,45 @@ export class Lesson {
 		this.flow = { i: 0, misses: 0 };
 		this.find = { queue: [], asked: null, misses: 0 };
 		this.done = false;
+		this.script = new Map();
 
 		this.buildUI();
+		this.scriptReady = loadLessonScript().then((m) => {
+			this.script = m;
+			this.applyIntroText();
+			this.bindIntroClip();
+			const st = this.steps[this.i];
+			if (st) {
+				this.applyCardText(st);
+				this.bindPromptClip(st);
+			}
+		});
 	}
 
 	textOf(field) {
 		if (!field) return '';
 		return typeof field === 'string' ? field : field[this.level] || field.hs || '';
+	}
+
+	scriptText(...keys) {
+		return scriptJoin(this.script, ...keys);
+	}
+
+	applyIntroText() {
+		const t = this.scriptText('intro');
+		if (!t || !this.introText) return;
+		this.introText.text = t;
+		this.introText.sync();
+	}
+
+	applyCardText(st) {
+		if (!st) return;
+		const card = this.scriptText(`${st.id}.${this.level}`, st.id);
+		if (card) this.prompt.set(card);
+		else this.prompt.set(`${st.title}\n\n${st.verb.toUpperCase()} — ${this.textOf(st.prompt)}`);
+		const fb = this.scriptText(`${st.id}.feedback.${this.level}`, `${st.id}.feedback`);
+		this.say(fb || this.misconceptionFor(st.id));
+		if (fb) this.playClip(`feedback:${st.id}`);
 	}
 
 	partName(id) {
@@ -159,11 +206,18 @@ export class Lesson {
 		this.feedback.onfit = () => this.relayout();
 		this.prompt.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
 		this.feedback.group.position.set(this.ui.panelX, this.ui.panelBottom, panelZ);
+		this.clips = new ClipBank();
+		this.clipCache = new Map();
+		for (const [key, stems] of Object.entries(this.oneShotStems())) {
+			// Pre-locate every one-shot clip while the student is still on the intro, so the
+			// first trigger (step 2 feedback, first waypoint, first "Find it") plays instantly.
+			this.clips.locate(stems).then((c) => this.clipCache.set(key, c));
+		}
 		this.promptSpeaker = this.buildSpeakerIcon();
 		this.promptSpeaker.position.set(-this.ui.panelW * 0.5 - 0.04, -0.02, 0.02);
+		this.promptSpeaker.visible = false;
 		this.prompt.group.add(this.promptSpeaker);
-		this.promptAudio = new Audio('assets/audio/s1-orient.wav');
-		this.promptAudio.preload = 'auto';
+		this.promptClip = [];
 		// The plate is sized from the same angular spec as everything else, so it stays the same
 		// apparent size on the lens when the card moves closer to or further from the face.
 		// Tiny stand-ins — later swapped for designed image plates.
@@ -290,6 +344,11 @@ export class Lesson {
 		this.quizBody.position.set(0, 0.12, 0.02);
 		this.liftQuizText();
 		this.quizHud.add(this.quizBack, this.quizTitle, this.quizBody);
+		this.quizSpeaker = this.buildSpeakerIcon();
+		this.quizSpeaker.position.set(-this.quizCardW * 0.5 - 0.04, 0.08, 0.03);
+		this.quizSpeaker.visible = false;
+		this.quizHud.add(this.quizSpeaker);
+		this.quizClip = [];
 
 		this.quizBtns = [];
 		const bw = 0.18;
@@ -365,33 +424,64 @@ export class Lesson {
 		return g;
 	}
 
-	playClip(el) {
-		if (!el) return false;
-		if (!el.paused) {
-			el.pause();
-			el.currentTime = 0;
-			return true;
-		}
-		el.play().catch(() => {});
-		return true;
-	}
-
 	playIntroAudio() {
 		this.introTimer = Math.max(this.introTimer, 14);
-		return this.playClip(this.introAudio);
+		return this.clips.play(this.introClip);
 	}
 
 	playPromptAudio() {
-		if (this.i !== 0) return false;
-		return this.playClip(this.promptAudio);
+		return this.clips.play(this.promptClip);
+	}
+
+	playQuizAudio() {
+		return this.clips.play(this.quizClip);
 	}
 
 	stopLessonAudio() {
-		for (const el of [this.introAudio, this.promptAudio]) {
-			if (!el) continue;
-			el.pause();
-			el.currentTime = 0;
+		this.clips?.stop();
+	}
+
+	/**
+	 * Every one-shot clip this lesson can trigger, keyed by a stable string. Pre-located in the
+	 * constructor; playClip(key) fires the found clip. A key with no matching file resolves to
+	 * [] and playClip is a silent no-op — the app must never break because a clip is missing.
+	 */
+	oneShotStems() {
+		const s = {};
+		for (const m of this.data.misconceptions || []) s[`feedback:${m.step}`] = feedbackStems(m.step, this.level);
+		for (const id of this.data.tiers?.core || []) s[`part:${id}`] = partStems(id);
+		for (const hop of this.data.flow?.order || []) {
+			if (hop.kind === 'waypoint') s[`waypoint:${hop.id}`] = waypointStems(hop.id);
 		}
+		for (const v of this.data.vocab || []) s[`vocab:${v.term}`] = vocabStems(v.term, this.level);
+		(this.data.quiz || []).forEach((_, n) => (s[`quiz-why:${n}`] = quizWhyStems(n)));
+		for (const name of ['play', 'passthrough', 'continue', 'restart', 'restart-confirm', 'yes', 'no']) {
+			s[`hud:${name}`] = hudStems(name);
+		}
+		s['done'] = doneStems();
+		s['video-title'] = videoTitleStems();
+		return s;
+	}
+
+	/** Play a pre-located one-shot clip. False (silent) if the clip does not exist. */
+	playClip(key) {
+		const c = this.clipCache.get(key);
+		return c && c.length ? this.clips.play(c) : false;
+	}
+
+	async bindIntroClip() {
+		this.introClip = await this.clips.locate(introStems());
+		if (this.introSpeaker) this.introSpeaker.visible = this.introClip.length > 0;
+	}
+
+	async bindPromptClip(st) {
+		this.promptClip = st ? await this.clips.locate(promptStems(st.id, this.level)) : [];
+		if (this.promptSpeaker) this.promptSpeaker.visible = this.promptClip.length > 0;
+	}
+
+	async bindQuizClip(n) {
+		this.quizClip = await this.clips.locate(quizStems(n));
+		if (this.quizSpeaker) this.quizSpeaker.visible = this.quizClip.length > 0;
 	}
 
 	buildIntro() {
@@ -416,9 +506,10 @@ export class Lesson {
 		this.intro.add(this.introText);
 		this.introSpeaker = this.buildSpeakerIcon();
 		this.introSpeaker.position.set(-0.3, 0, 0.02);
+		this.introSpeaker.visible = false;
 		this.intro.add(this.introSpeaker);
-		this.introAudio = new Audio('assets/audio/intro.wav');
-		this.introAudio.preload = 'auto';
+		this.introClip = [];
+		this.bindIntroClip();
 		this.intro.lookAt(0, 1.45, 0);
 		this.introTimer = 0;
 		this.startIntro();
@@ -640,12 +731,16 @@ export class Lesson {
 		if (a.reassemble) this.model.scatter();
 		this.tweenFactor(target, a.explode === 0 ? 0.6 : 5.0);
 
-		this.prompt.set(`${st.title}\n\n${st.verb.toUpperCase()} — ${this.textOf(st.prompt)}`);
-		this.say(this.misconceptionFor(st.id));
+		this.applyCardText(st);
 		this.setContinueEnabled(!a.flow && !a.reassemble);
 		this.updateStepDots();
 		this.relayout();
-		if (this.promptSpeaker) this.promptSpeaker.visible = this.i === 0;
+		this.bindPromptClip(st);
+		if (st.action?.flow) {
+			// Announce the first hop as soon as the trace step opens; later hops announce on select.
+			const hop = this.nextWaypointAfter(0);
+			if (hop) this.playClip(`waypoint:${hop.id}`);
+		}
 		if (this._awaitIntro) this.setCardFade(0);
 		else this.beginCardFade();
 		this.fire('step', st.id);
@@ -711,6 +806,7 @@ export class Lesson {
 		this.revealPathTo(this.find.asked);
 		// The part name here is the task, not commentary — white, like the prompt card.
 		this.say(`Find it: ${this.partName(this.find.asked)}`, 0xffffff);
+		this.playClip(`part:${this.find.asked}`);
 		return this.find.asked;
 	}
 
@@ -910,6 +1006,7 @@ export class Lesson {
 		});
 		this.liftQuizText();
 		this.quizHud.visible = true;
+		this.bindQuizClip(n);
 		this.placeQuizNearRA();
 		return true;
 	}
@@ -929,6 +1026,8 @@ export class Lesson {
 	hideQuiz() {
 		this.quiz = null;
 		this.quizHud.visible = false;
+		if (this.quizSpeaker) this.quizSpeaker.visible = false;
+		this.stopLessonAudio();
 		for (const b of this.quizBtns || []) b.visible = false;
 		this.fadeContinue(this.continueOn);
 		this.playBtn.visible = true;
@@ -983,6 +1082,7 @@ export class Lesson {
 		const { item, n } = this.quiz;
 		if (i === item.answer) {
 			this.say(`Quiz ${n + 1} — correct. ${item.why}`, OK);
+			this.playClip(`quiz-why:${n}`);
 			this._quizDone = true;
 			this.hideQuiz();
 			this.beginLeave(() => {
@@ -992,6 +1092,7 @@ export class Lesson {
 			return true;
 		}
 		this.say(`Quiz ${n + 1} — not that one. ${item.why}`, BAD);
+		this.playClip(`quiz-why:${n}`);
 		return false;
 	}
 
@@ -1025,6 +1126,7 @@ export class Lesson {
 		this.tweenFactor(0, 2.5);
 		this.prompt.set(`${this.data.title} — done. ${this.data.credits}`, 0xffffff);
 		this.say('Press the trigger anywhere to start again for the next student.', OK);
+		this.playClip('done');
 		this.setContinueEnabled(true);
 		this.fire('finish');
 	}
@@ -1186,6 +1288,7 @@ export class Lesson {
 				this.flow.misses = 0;
 				const hop = this.nextWaypointAfter(this.flow.i);
 				this.say(hop ? `${hop.label}` : `Good — ${this.partName(id)}.`, OK);
+				if (hop) this.playClip(`waypoint:${hop.id}`);
 				if (this.flow.i < want.length) this.revealPathTo(want[this.flow.i]);
 				if (this.flow.i >= want.length) {
 					this.say(`Complete. And remember: the vessel that leaves for the lungs carries LOW-oxygen blood.`, OK);
@@ -1243,6 +1346,8 @@ export class Lesson {
 
 		// Exploring steps: naming on select is the lesson, not a test.
 		this.say(`${this.partName(id)} — ${this.factFor(id)}`, MUTED);
+		const v = (this.data.vocab || []).find((x) => (x.ids || []).includes(id));
+		if (v) this.playClip(`vocab:${v.term}`);
 		return 'info';
 	}
 
@@ -1312,6 +1417,7 @@ export class Lesson {
 		if (!this.video.open(clip, at)) return false;
 		this.hideForVideo();
 		this.fire('video-open', clip);
+		this.playClip('video-title');
 		return true;
 	}
 
@@ -1414,6 +1520,7 @@ export class Lesson {
 		if (this.yesBtn) this.yesBtn.visible = true;
 		if (this.noBtn) this.noBtn.visible = true;
 		if (this.restartAsk) this.restartAsk.visible = true;
+		this.playClip('hud:restart-confirm');
 		return true;
 	}
 
@@ -1433,6 +1540,7 @@ export class Lesson {
 	}
 
 	togglePassthrough() {
+		this.playClip('hud:passthrough');
 		this.passthrough = !this.passthrough;
 		if (this.sky) this.sky.visible = !this.passthrough;
 		setButtonLabel(this.passBtn, this.passthrough ? '360 sky' : 'Passthrough');
@@ -1452,6 +1560,8 @@ export class Lesson {
 			return 'intro-audio';
 		if (this.promptSpeaker?.visible && this.prompt?.group.visible && this.ray.intersectObject(this.promptSpeaker.userData.hit, false).length)
 			return 'prompt-audio';
+		if (this.quizSpeaker?.visible && this.quizHud?.visible && this.ray.intersectObject(this.quizSpeaker.userData.hit, false).length)
+			return 'quiz-audio';
 		if (this.continueOn && this._continuePick !== false && this.continueBtn.visible && this.ray.intersectObject(btnHit(this.continueBtn), false).length)
 			return 'continue';
 		if (this.playBtn.visible && this.ray.intersectObject(btnHit(this.playBtn), false).length) return 'play';
@@ -1487,6 +1597,10 @@ export class Lesson {
 		}
 		if (ui === 'prompt-audio') {
 			const hit = this.ray.intersectObject(this.promptSpeaker.userData.hit, false)[0];
+			return { dist: hit?.distance ?? null, ui, partId: null };
+		}
+		if (ui === 'quiz-audio') {
+			const hit = this.ray.intersectObject(this.quizSpeaker.userData.hit, false)[0];
 			return { dist: hit?.distance ?? null, ui, partId: null };
 		}
 		if (ui === 'continue') {

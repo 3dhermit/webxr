@@ -1,0 +1,195 @@
+Heart lesson — student text (teachers edit this)
+================================================
+This file is what students READ on screen and what the speaker plays.
+
+How to edit
+- Change only the words under a --- header ---. Do not rename the header.
+- Save the file. Rebuild the lesson (or copy this file over assets/audio/tts-script.txt).
+- Put each extra spoken clip on a new header with _02, _03, …  Those lines also show on screen, in order.
+
+  --- s1-orient.hs_01 ---   →  s1-orient.hs_01.mp3
+  --- s1-orient.hs_02 ---   →  s1-orient.hs_02.mp3
+
+HS is the classroom default. Use .ms headers for the younger reading level.
+
+--- intro_01 ---
+Trigger is select or next.
+Squeeze to pick up a part.
+Hold both grips to start over.
+
+--- s1-orient.hs_01 ---
+Meet the heart in place. Look. This is the heart sitting in the chest. Before anything moves: which side do you think holds the blood that has already given up its oxygen?
+
+--- s1-orient.ms_01 ---
+Meet the heart in place. Look. Look at the heart. Which half do you think holds blood that has already dropped off its oxygen?
+
+--- s2-explode.hs_01 ---
+Pull it apart. Explode. Slowly explode the model. Say out loud what separates from what, and which pieces were hidden inside. Then name the four chambers you can now see from every angle.
+
+--- s2-explode.ms_01 ---
+Pull it apart. Explode. Slowly pull the heart apart. Say what comes out. Point at the four rooms.
+
+--- s2-explode.feedback.hs_01 ---
+The heart does not pump blood from the lungs and the body into one shared chamber. The septum separates the two halves, so right-side and left-side blood never share a chamber. The two circuits are in series, not pooled.
+
+--- s2-explode.feedback.ms_01 ---
+The wall down the middle keeps the two trips of blood apart.
+
+--- s3-compare.hs_01 ---
+Two pumps, not one. Isolate. Isolate the left ventricle, then the right. Compare their wall thickness. Why would the body's supply need a thicker wall than the lungs' supply?
+
+--- s3-compare.ms_01 ---
+Two pumps, not one. Isolate. Look at the big pumping room on each side. One wall is thicker. Why would that one need to push harder?
+
+--- s4-trace.hs_01 ---
+Follow one drop of blood. Trace. Click the parts in the order one drop of blood passes through them, starting where blood enters from the body.
+
+--- s4-trace.ms_01 ---
+Follow one drop of blood. Trace. Click the parts in the order blood flows through the heart.
+
+--- s4-trace.feedback.hs_01 ---
+Arteries do not always carry oxygen-rich blood. A vessel is an artery because it carries blood away from the heart, not because of how much oxygen it holds. The pulmonary trunk carries blood low in oxygen from the right ventricle to the lungs.
+
+--- s4-trace.feedback.ms_01 ---
+The tube going to the lungs carries blood that is low in oxygen, even though it leaves the heart.
+
+--- s5-retrieve.hs_01 ---
+Put it back and name it. Reassemble. Assemble the heart, then name every part you are asked to find — no labels this time.
+
+--- s5-retrieve.ms_01 ---
+Put it back and name it. Reassemble. Put the heart back together, then point at each part you are asked for.
+
+--- done_01 ---
+How the heart moves blood — and keeps two circuits apart. Done.
+
+--- quiz-1_01 ---
+Quiz 1. Which valve separates the left atrium from the left ventricle? Mitral valve. Tricuspid valve. Pulmonary valve. Aortic valve.
+
+--- quiz-1.why_01 ---
+The mitral, or bicuspid, valve guards the left atrium-to-ventricle opening. The tricuspid guards the right side.
+
+--- quiz-2_01 ---
+Quiz 2. Which lists the valves in the order blood passes through them, from the vena cava onward? Tricuspid, pulmonary, mitral, aortic. Mitral, pulmonary, tricuspid, aortic. Aortic, pulmonary, tricuspid, mitral. Mitral, aortic, tricuspid, pulmonary.
+
+--- quiz-2.why_01 ---
+Right side first: tricuspid then pulmonary. Through the lungs. Then left side: mitral then aortic.
+
+--- quiz-3_01 ---
+Quiz 3. Which chamber first receives blood returning from the body? Right atrium. Left atrium. Left ventricle. Right ventricle.
+
+--- quiz-3.why_01 ---
+The venae cavae empty into the right atrium.
+
+--- quiz-4_01 ---
+Quiz 4. In which chamber would you find the thickest myocardium? Left ventricle. Right ventricle. Left atrium. Right atrium.
+
+--- quiz-4.why_01 ---
+The left ventricle drives the systemic circuit, at much higher pressure than the pulmonary circuit.
+
+--- waypoint.wp-venae-cavae_01 ---
+From the body.
+
+--- waypoint.wp-lungs_01 ---
+To the lungs.
+
+--- waypoint.wp-pulmonary-veins_01 ---
+From the lungs.
+
+--- waypoint.wp-aorta_01 ---
+To the body.
+
+--- part.UBERON-0002078_01 ---
+Right atrium.
+
+--- part.UBERON-0002079_01 ---
+Left atrium.
+
+--- part.UBERON-0002080_01 ---
+Right ventricle.
+
+--- part.UBERON-0002084_01 ---
+Left ventricle.
+
+--- part.UBERON-0002134_01 ---
+Tricuspid valve.
+
+--- part.UBERON-0002135_01 ---
+Mitral valve.
+
+--- part.UBERON-0002137_01 ---
+Aortic valve.
+
+--- part.UBERON-0002146_01 ---
+Pulmonary valve.
+
+--- part.UBERON-0002094_01 ---
+Septum.
+
+--- part.FMA-7264_01 ---
+Papillary muscle.
+
+--- part.FMA-7267_01 ---
+Papillary muscle.
+
+--- part.FMA-7265_01 ---
+Papillary muscle.
+
+--- part.FMA-7262_01 ---
+Papillary muscle.
+
+--- part.FMA-7261_01 ---
+Papillary muscle.
+
+--- vocab.atrium.hs_01 ---
+Atrium. A receiving chamber that fills from a vein and pumps into the ventricle below it.
+
+--- vocab.atrium.ms_01 ---
+Atrium. An upper room that lets blood in.
+
+--- vocab.ventricle.hs_01 ---
+Ventricle. A pumping chamber that pushes blood out through a semilunar valve into a vessel.
+
+--- vocab.ventricle.ms_01 ---
+Ventricle. A lower room that pushes blood out.
+
+--- vocab.valve.hs_01 ---
+Valve. A flap that opens one way and stops blood flowing backwards.
+
+--- vocab.valve.ms_01 ---
+Valve. A door that only opens one way.
+
+--- vocab.septum.hs_01 ---
+Septum. The wall between the two halves. It is what keeps the two circuits from mixing.
+
+--- vocab.septum.ms_01 ---
+Septum. The wall down the middle that keeps the two sides apart.
+
+--- vocab.myocardium.hs_01 ---
+Myocardium. The heart's own muscle layer. Its thickness shows how hard a chamber pushes.
+
+--- vocab.myocardium.ms_01 ---
+Myocardium. The muscle of the heart wall.
+
+--- hud.play_01 ---
+Play video.
+
+--- hud.passthrough_01 ---
+Passthrough.
+
+--- hud.continue_01 ---
+Continue.
+
+--- hud.restart_01 ---
+Restart.
+
+--- hud.restart-confirm_01 ---
+Start over?
+
+--- hud.yes_01 ---
+Yes.
+
+--- hud.no_01 ---
+No.
+
+--- video.title_01 ---
+Anatomage walkthrough.
