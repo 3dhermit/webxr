@@ -352,17 +352,26 @@ export class Lesson {
 		this.quizClip = [];
 
 		this.quizBtns = [];
-		const bw = 0.18;
-		const bh = 0.05;
+		// One full-width row per answer so long choices (quiz 2) wrap on the plate
+		// instead of overflowing into the neighbour and vanishing behind it.
+		this.quizBtnW = cardW - 0.04;
+		this.quizBtnH = 0.062;
+		this.quizBtnGap = 0.016;
+		const bw = this.quizBtnW;
+		const bh = this.quizBtnH;
 		for (let i = 0; i < 4; i++) {
-			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(28), hitScale: 1.2 });
+			const b = makeButton({ label: ' ', width: bw, height: bh, fontSize: px(24), hitScale: 1.1 });
 			b.userData.plate.material = new THREE.MeshBasicMaterial({
 				color: 0x2f6fb3,
+				transparent: true,
+				opacity: 0.92,
 				depthTest: false,
 				depthWrite: false,
 			});
 			b.userData.plate.renderOrder = 40;
-			b.userData.caption.position.z = 0.02;
+			b.userData.caption.maxWidth = bw - 0.03;
+			b.userData.caption.position.z = 0.05;
+			liftText(b.userData.caption, 50);
 			b.visible = false;
 			this.quizHud.add(b);
 			this.quizBtns.push(b);
@@ -941,10 +950,12 @@ export class Lesson {
 		const c = box.getCenter(new THREE.Vector3());
 		const eye = this.camera.getWorldPosition(new THREE.Vector3());
 		const toward = eye.clone().sub(c);
+		toward.y = 0;
 		if (toward.lengthSq() < 1e-8) toward.set(0, 0, 1);
 		toward.normalize();
-		c.addScaledVector(toward, 0.12);
-		c.y += 0.02 + (this._contY || 0);
+		// Park under the organ, then step toward the student so the mesh does not swallow the chip.
+		c.y = box.min.y - 0.06 - (this._contY || 0);
+		c.addScaledVector(toward, 0.05);
 		this.player.worldToLocal(c);
 		this.continueBtn.position.copy(c);
 		this.continueBtn.lookAt(0, this.ui.eyeY, 0);
@@ -1037,13 +1048,10 @@ export class Lesson {
 
 	/** Choice plates in camera-local space, under the question, never in world space. */
 	placeQuizBtns() {
-		const bw = 0.18;
-		const bh = 0.05;
-		const gap = 0.014;
+		const bh = this.quizBtnH || 0.062;
+		const gap = this.quizBtnGap || 0.016;
 		this.quizBtns.forEach((b, i) => {
-			const col = i % 2;
-			const row = Math.floor(i / 2);
-			b.position.set((col ? 1 : -1) * (bw / 2 + gap), -0.04 - row * (bh + gap), 0.03);
+			b.position.set(0, -0.02 - i * (bh + gap), 0.04);
 		});
 	}
 
