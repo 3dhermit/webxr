@@ -163,6 +163,24 @@ export function btnHit(btn) {
 	return btn?.userData?.hit || btn?.userData?.plate;
 }
 
+/**
+ * Troika sync() rebuilds glyph materials and drops depth flags. Call after every sync
+ * so type paints after (and in front of) a depthTest-off plate.
+ */
+export function liftText(text, order) {
+	if (!text) return;
+	text.traverse((o) => {
+		o.renderOrder = order;
+		const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+		for (const m of mats) {
+			m.depthTest = false;
+			m.depthWrite = false;
+			m.transparent = true;
+			m.needsUpdate = true;
+		}
+	});
+}
+
 /** 3D button: a plate plus a caption. Returns an Object3D whose userData.onClick we wire up. */
 export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02, hitScale = 2 }) {
 	const g = new THREE.Group();
@@ -172,14 +190,20 @@ export function makeButton({ label, width = 0.2, height = 0.055, fontSize = 0.02
 	);
 	const caption = makeText({ fontSize, maxWidth: width, anchorX: 'center', anchorY: 'middle', align: 'center' });
 	caption.text = label;
-	caption.sync();
 	const hit = new THREE.Mesh(
 		new THREE.PlaneGeometry(width * hitScale, height * hitScale),
 		new THREE.MeshBasicMaterial({ visible: false, depthTest: false, depthWrite: false }),
 	);
+	plate.material.depthTest = false;
+	plate.material.depthWrite = false;
+	plate.renderOrder = 28;
 	hit.renderOrder = 40;
 	g.add(plate, caption, hit);
-	caption.position.z = 0.006;
+	// Millimetres in front of the plate, and a higher renderOrder: HUD plates use
+	// depthTest false, so a caption at the default order 0 is painted then covered.
+	caption.position.z = 0.012;
+	liftText(caption, 32);
+	caption.sync(() => liftText(caption, 32));
 	g.userData.plate = plate;
 	g.userData.caption = caption;
 	g.userData.hit = hit;
@@ -191,6 +215,6 @@ export function setButtonLabel(btn, label) {
 	const cap = btn?.userData?.caption;
 	if (!cap) return btn;
 	cap.text = label;
-	cap.sync();
+	cap.sync(() => liftText(cap, cap.renderOrder || 32));
 	return btn;
 }

@@ -18,7 +18,7 @@ import {
 	vocabStems,
 	waypointStems,
 } from './audio.js';
-import { Panel, btnHit, makeButton, makeLabel, makeLeaderLine, makeText, setButtonLabel, updateLeaderLine } from './text.js';
+import { Panel, btnHit, liftText, makeButton, makeLabel, makeLeaderLine, makeText, setButtonLabel, updateLeaderLine } from './text.js';
 import { loadLessonScript, scriptJoin } from './script.js';
 import { VideoScreen } from './video.js';
 
@@ -239,6 +239,7 @@ export class Lesson {
 		});
 		this.continueBtn.userData.plate.renderOrder = 28;
 		this.continueBtn.userData.caption.position.z = 0.012;
+		liftText(this.continueBtn.userData.caption, 32);
 		this.playBtn = makeButton({ label: 'Play video', width: hudW, height: hudH, fontSize: hudFs });
 		this.passBtn = makeButton({ label: 'Passthrough', width: hudW, height: hudH, fontSize: hudFs });
 		this.hudBtns = new THREE.Group();
@@ -879,7 +880,10 @@ export class Lesson {
 		const plate = this.continueBtn.userData.plate;
 		plate.material.color.setHex(on ? 0x22c55e : 0x3a4550);
 		this.continueBtn.userData.caption.color = on ? 0xffffff : 0x8a97a3;
-		this.continueBtn.userData.caption.sync(() => this.applyContinueCaption(this._contOp ?? (on ? 1 : 0)));
+		this.continueBtn.userData.caption.sync(() => {
+			liftText(this.continueBtn.userData.caption, 32);
+			this.applyContinueCaption(this._contOp ?? (on ? 1 : 0));
+		});
 		if (!this.quiz && !this._awaitIntro) this.fadeContinue(on);
 		else if (!on) this.fadeContinue(false);
 	}
@@ -906,6 +910,7 @@ export class Lesson {
 	applyContinueCaption(t) {
 		const cap = this.continueBtn?.userData?.caption;
 		if (!cap) return;
+		liftText(cap, 32);
 		cap.fillOpacity = t;
 		cap.outlineOpacity = 0.75 * t;
 		cap.strokeOpacity = t;
@@ -914,6 +919,7 @@ export class Lesson {
 			for (const m of mats) {
 				m.transparent = true;
 				m.opacity = t;
+				m.depthTest = false;
 				m.depthWrite = false;
 			}
 		});
@@ -1009,16 +1015,16 @@ export class Lesson {
 		this.dismissIntro();
 		const title = item.title || `Quiz ${n + 1}`;
 		this.quizTitle.text = title;
-		this.quizTitle.sync();
+		this.quizTitle.sync(() => this.liftQuizText());
 		this.quizBody.text = item.q;
-		this.quizBody.sync();
+		this.quizBody.sync(() => this.liftQuizText());
 		this.liftQuizText();
 		this.placeQuizBtns();
 		item.choices.forEach((c, i) => {
 			const b = this.quizBtns[i];
 			if (!b) return;
 			b.userData.caption.text = c;
-			b.userData.caption.sync();
+			b.userData.caption.sync(() => this.liftQuizText());
 			b.visible = true;
 		});
 		this.liftQuizText();
@@ -1061,20 +1067,9 @@ export class Lesson {
 
 	/** Troika rebuilds materials on sync — keep type above the dark plate. */
 	liftQuizText() {
-		for (const t of [this.quizTitle, this.quizBody]) {
-			if (!t) continue;
-			t.renderOrder = 45;
-			t.material.depthTest = false;
-			t.material.depthWrite = false;
-			t.material.transparent = true;
-		}
+		for (const t of [this.quizTitle, this.quizBody]) liftText(t, 45);
 		for (const b of this.quizBtns || []) {
-			const cap = b.userData?.caption;
-			if (!cap) continue;
-			cap.renderOrder = 50;
-			cap.material.depthTest = false;
-			cap.material.depthWrite = false;
-			cap.material.transparent = true;
+			liftText(b.userData?.caption, 50);
 			if (b.userData.plate) b.userData.plate.renderOrder = 40;
 		}
 	}
